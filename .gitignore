@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+venv/
+config/
+*.json.bak
+default_DeviceOption.json
+core/ocr/baas_ocr_client/bin/output/
