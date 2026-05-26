@@ -877,6 +877,8 @@ class Baas_thread:
                 self.flag_run = False
                 return False
 
+        self.refresh_common_tasks()
+        self.refresh_hard_tasks()
         self.logger.info("--------Initialization Finished----------")
         return True
 

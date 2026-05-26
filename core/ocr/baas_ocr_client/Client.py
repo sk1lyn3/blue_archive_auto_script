@@ -112,6 +112,10 @@ class BaasOcrClient:
         # chmod +x BAAS_ocr_server
         if sys.platform == "linux":
             subprocess.run(["chmod", "+x", self.exe_path])
+        env = os.environ.copy()
+        if sys.platform == "linux":
+            existing = env.get("LD_LIBRARY_PATH", "")
+            env["LD_LIBRARY_PATH"] = self.server_folder_path + (":" + existing if existing else "")
         try:
             self.server_process = subprocess.Popen(
                 self.exe_path,
@@ -119,6 +123,7 @@ class BaasOcrClient:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                env=env,
                 text=True
             )
         except Exception:
@@ -128,6 +133,7 @@ class BaasOcrClient:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+                env=env,
                 text=True
             )
         # wait for server start
