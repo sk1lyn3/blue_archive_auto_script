@@ -819,6 +819,8 @@ def swipe_item_list_get_y_diff(self, item_lines_y):
     self.swipe(690, 511, 690, 348, duration=0.05, post_sleep_time=1)
     self.update_screenshot_array()
     position = image.search_image_in_area(self, tar_img, area=(713 - 10, 122, 1247 + 10, 482), threshold=0.8)
+    if not position:
+        return 0
     return area[1] - position[1]
 
 

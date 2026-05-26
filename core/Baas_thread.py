@@ -737,6 +737,8 @@ class Baas_thread:
         if not self.flag_run:
             raise RequestHumanTakeOver
         self.logger.info(f"swipe from ( " + str(fx) + " , " + str(fy) + " ) --> ( " + str(tx) + " , " + str(ty) + " )")
+        if self.config.screenshot_method == "virtual_scrcpy":
+            duration = max(1.5, duration or 0.3)
         self.u2.swipe(fx * self.ratio, fy * self.ratio, tx * self.ratio, ty * self.ratio, duration)
         if post_sleep_time > 0:
             time.sleep(post_sleep_time)
@@ -1101,6 +1103,8 @@ class Baas_thread:
         self.u2 = self.u2_client.get_connection()
         self.last_refresh_u2_time = time.time()
         if self.config.screenshot_method == "virtual_scrcpy":
+            from core.device.virtual_u2_proxy import VirtualU2Proxy
+            self.u2 = VirtualU2Proxy(self.u2, self.serial)
             return (1280, 720)
         self.check_atx()
         return self.resolution_uiautomator2()

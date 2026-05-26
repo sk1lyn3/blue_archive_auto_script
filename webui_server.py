@@ -195,9 +195,15 @@ def get_config():
 
 @app.put('/api/config')
 async def put_config(body: dict):
+    global _config_dir
     from fastapi import HTTPException
     if not body or 'server' not in body:
         raise HTTPException(400, 'Invalid config: must be a non-empty config object with at least a "server" field')
+    config_dir = body.pop('_configDir', None)
+    if config_dir:
+        base = os.path.join(os.path.dirname(__file__), 'config')
+        if os.path.isdir(os.path.join(base, config_dir)):
+            _config_dir = config_dir
     _write_json('config.json', body)
     return {'ok': True}
 
