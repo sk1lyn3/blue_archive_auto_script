@@ -1,4 +1,8 @@
+import time
+import cv2
 from core.device.scrcpy_client import ScrcpyClient
+
+_last_save_time = 0
 
 
 class ScrcpyScreenshot:
@@ -7,4 +11,10 @@ class ScrcpyScreenshot:
         self.cli = ScrcpyClient.get_instance(self.serial)
 
     def screenshot(self):
-        return self.cli.screenshot()
+        global _last_save_time
+        frame = self.cli.screenshot()
+        now = time.time()
+        if now - _last_save_time > 5.0:
+            _last_save_time = now
+            cv2.imwrite("/tmp/baas_scrcpy_frame.png", frame)
+        return frame

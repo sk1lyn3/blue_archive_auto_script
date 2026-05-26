@@ -325,6 +325,9 @@ class Connection:
 
     def get_current_package(self):
         self.logger.info("Get Current Package.")
+        if getattr(self.config, 'screenshot_method', '') == "virtual_scrcpy":
+            from core.device.virtual_scrcpy_client import VirtualScrcpyClient
+            return VirtualScrcpyClient.get_instance(self.serial).get_foreground_package()
         for _ in range(3):
             d = adb.device(self.serial)
             try:

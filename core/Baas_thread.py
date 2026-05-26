@@ -692,7 +692,7 @@ class Baas_thread:
             # "fighting_feature": (1226, 51)
         }
         picture.co_detect(self, ["main_page"], rgb_possibles, None, img_reactions, skip_first_screenshot,
-                          tentative_click=True)
+                          tentative_click=True, tentative_x=1270, tentative_y=360)
 
     def init_image_resource(self):
         return position.init_image_data(self)
@@ -1099,8 +1099,10 @@ class Baas_thread:
     def _get_android_device_resolution(self):
         self.u2_client = U2Client.get_instance(self.serial)
         self.u2 = self.u2_client.get_connection()
-        self.check_atx()
         self.last_refresh_u2_time = time.time()
+        if self.config.screenshot_method == "virtual_scrcpy":
+            return (1280, 720)
+        self.check_atx()
         return self.resolution_uiautomator2()
 
     def resolution_uiautomator2(self):

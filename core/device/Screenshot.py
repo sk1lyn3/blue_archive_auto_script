@@ -4,6 +4,7 @@ from core.device.screenshot.scrcpy import ScrcpyScreenshot
 from core.device.screenshot.nemu import NemuScreenshot
 from core.device.screenshot.adb import AdbScreenshot
 from core.device.screenshot.uiautomator2 import U2Screenshot
+from core.device.screenshot.virtual_scrcpy import VirtualScrcpyScreenshot
 import time
 
 
@@ -35,6 +36,8 @@ class Screenshot:
                 self.screenshot_instance = U2Screenshot(self.connection)
             elif self.method == "scrcpy":
                 self.screenshot_instance = ScrcpyScreenshot(self.connection)
+            elif self.method == "virtual_scrcpy":
+                self.screenshot_instance = VirtualScrcpyScreenshot(self.connection)
         else:
             if sys.platform == "win32":
                 from core.device.screenshot.pyautogui import PyautoguiScreenshot
