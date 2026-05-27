@@ -747,6 +747,19 @@ class Baas_thread:
         if post_sleep_time > 0:
             time.sleep(post_sleep_time)
 
+    def pinch(self, cx, cy, spread_start, spread_end, steps=30):
+        if not self.flag_run:
+            raise RequestHumanTakeOver
+        if self.config.screenshot_method == "virtual_scrcpy":
+            from core.device.virtual_scrcpy_client import VirtualScrcpyClient
+            VirtualScrcpyClient.get_instance(self.serial).pinch(
+                int(cx * self.ratio), int(cy * self.ratio),
+                int(spread_start * self.ratio), int(spread_end * self.ratio),
+                steps
+            )
+        elif self.is_android_device:
+            self.u2().pinch_in(percent=int(spread_end / spread_start * 100), steps=steps)
+
     def get_ap(self, is_main_page=False):
         if is_main_page:
             region = {

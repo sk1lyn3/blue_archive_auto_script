@@ -119,11 +119,7 @@ def gift_to_cafe(self):
 
 def zoom_out(self):
     if self.is_android_device:
-        if getattr(self.config, 'screenshot_method', '') == 'virtual_scrcpy':
-            from core.device.virtual_scrcpy_client import VirtualScrcpyClient
-            VirtualScrcpyClient.get_instance(self.serial).pinch(640, 360, 300, 50, steps=30)
-        else:
-            self.u2().pinch_in(percent=50, steps=30)
+        self.pinch(640, 360, 300, 50, steps=30)
     else:
         for _ in range(0, 15):
             self.control.scroll(640, 360, 10)
@@ -138,7 +134,7 @@ def swipe_gift_thread(self, duration, ret_queue):
 def swipe_gift_and_screenshot(self):
     shotDelay = self.config.cafe_reward_interaction_shot_delay
     if self.is_android_device:
-        if getattr(getattr(self, 'config', None), 'screenshot_method', '') == 'virtual_scrcpy':
+        if self.config.screenshot_method == 'virtual_scrcpy':
             shotDelay = max(shotDelay, 0.6)
         t1 = threading.Thread(target=screenshot_thread, args=(self, shotDelay))
         t1.start()
@@ -157,7 +153,7 @@ def swipe_gift_and_screenshot(self):
 def find_student_position(self):
     swipe_t = swipe_gift_and_screenshot(self)
     img = cv2.resize(self.latest_img_array, (1280, 720), interpolation=cv2.INTER_AREA)
-    threshold = 0.55 if getattr(getattr(self, 'config', None), 'screenshot_method', '') == 'virtual_scrcpy' else 0.75
+    threshold = 0.55 if self.config.screenshot_method == 'virtual_scrcpy' else 0.75
     res = match(img, threshold)
     if not res:
         self.logger.info("No interaction found")
