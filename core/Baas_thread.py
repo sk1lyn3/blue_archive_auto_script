@@ -692,7 +692,7 @@ class Baas_thread:
             # "fighting_feature": (1226, 51)
         }
         picture.co_detect(self, ["main_page"], rgb_possibles, None, img_reactions, skip_first_screenshot,
-                          tentative_click=True, tentative_x=1270, tentative_y=360)
+                          tentative_click=True)
 
     def init_image_resource(self):
         return position.init_image_data(self)
@@ -729,6 +729,8 @@ class Baas_thread:
         if not self.flag_run:
             raise RequestHumanTakeOver
         self.logger.info(f"swipe from ( " + str(fx) + " , " + str(fy) + " ) --> ( " + str(tx) + " , " + str(ty) + " )")
+        if self.config.screenshot_method == "virtual_scrcpy":
+            duration = max(0.3, duration or 0.3)
         self.control.swipe(fx * self.ratio, fy * self.ratio, tx * self.ratio, ty * self.ratio, duration)
         if post_sleep_time > 0:
             time.sleep(post_sleep_time)
@@ -739,7 +741,9 @@ class Baas_thread:
         self.logger.info(f"swipe from ( " + str(fx) + " , " + str(fy) + " ) --> ( " + str(tx) + " , " + str(ty) + " )")
         if self.config.screenshot_method == "virtual_scrcpy":
             duration = max(1.5, duration or 0.3)
-        self.u2.swipe(fx * self.ratio, fy * self.ratio, tx * self.ratio, ty * self.ratio, duration)
+            self.control.swipe(fx * self.ratio, fy * self.ratio, tx * self.ratio, ty * self.ratio, duration)
+        else:
+            self.u2.swipe(fx * self.ratio, fy * self.ratio, tx * self.ratio, ty * self.ratio, duration or 0.3)
         if post_sleep_time > 0:
             time.sleep(post_sleep_time)
 

@@ -108,7 +108,7 @@ class VirtualScrcpyClient:
         if activity:
             cmd = f"am start --display {self._display_id} -n {package}/{activity}"
         else:
-            cmd = f"am start --display {self._display_id} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER {package}"
+            cmd = f"am start --display {self._display_id} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p {package}"
         self._adb(cmd)
 
     # ── 控制（走 scrcpy control socket，无 adb 子进程开销）────────────────

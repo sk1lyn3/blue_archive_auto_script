@@ -31,7 +31,7 @@ def implement(self):
 def start(self):
     self.logger.info("-- START BLUE ARCHIVE --")
     activity_name = self.activity_name
-    if self.server == 'CN':
+    if self.server == 'CN' and self.config.screenshot_method != 'virtual_scrcpy':
         activity_name = None
     if self.config.screenshot_method == "virtual_scrcpy":
         from core.device.virtual_scrcpy_client import VirtualScrcpyClient

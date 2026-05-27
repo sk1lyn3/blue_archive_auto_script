@@ -80,12 +80,11 @@ def to_no2_cafe(self):
     return
 
 
-def match(img):
+def match(img, threshold=0.75):
     res = []
     for i in range(1, 5):
         template = cv2.imread("src/images/CN/cafe/happy_face" + str(i) + ".png")
         result = cv2.matchTemplate(img, template, cv2.TM_CCOEFF_NORMED)
-        threshold = 0.75
         locations = np.where(result >= threshold)
         for pt in zip(*locations[::-1]):
             res.append([int(pt[0] + template.shape[1] / 2), int(pt[1] + template.shape[0] / 2 + 58)])
@@ -111,7 +110,7 @@ def screenshot_thread(self, delay):
         self.latest_img_array = self.u2_get_screenshot()
     else:
         self.update_screenshot_array()
-        cv2.imwrite("cafe_reward_shot.png", self.latest_img_array)
+    cv2.imwrite("cafe_reward_shot.png", self.latest_img_array)
 
 def gift_to_cafe(self):
     rgb_possibles = {"gift": (1240, 574)}
@@ -120,7 +119,11 @@ def gift_to_cafe(self):
 
 def zoom_out(self):
     if self.is_android_device:
-        self.u2().pinch_in(percent=50, steps=30)
+        if getattr(self.config, 'screenshot_method', '') == 'virtual_scrcpy':
+            from core.device.virtual_scrcpy_client import VirtualScrcpyClient
+            VirtualScrcpyClient.get_instance(self.serial).pinch(640, 360, 300, 50, steps=30)
+        else:
+            self.u2().pinch_in(percent=50, steps=30)
     else:
         for _ in range(0, 15):
             self.control.scroll(640, 360, 10)
@@ -135,6 +138,8 @@ def swipe_gift_thread(self, duration, ret_queue):
 def swipe_gift_and_screenshot(self):
     shotDelay = self.config.cafe_reward_interaction_shot_delay
     if self.is_android_device:
+        if getattr(getattr(self, 'config', None), 'screenshot_method', '') == 'virtual_scrcpy':
+            shotDelay = max(shotDelay, 0.6)
         t1 = threading.Thread(target=screenshot_thread, args=(self, shotDelay))
         t1.start()
         start_t = time.time()
@@ -152,7 +157,8 @@ def swipe_gift_and_screenshot(self):
 def find_student_position(self):
     swipe_t = swipe_gift_and_screenshot(self)
     img = cv2.resize(self.latest_img_array, (1280, 720), interpolation=cv2.INTER_AREA)
-    res = match(img)
+    threshold = 0.55 if getattr(getattr(self, 'config', None), 'screenshot_method', '') == 'virtual_scrcpy' else 0.75
+    res = match(img, threshold)
     if not res:
         self.logger.info("No interaction found")
         if swipe_t < self.config.cafe_reward_interaction_shot_delay + 0.3:
@@ -169,7 +175,7 @@ def find_student_position(self):
     gift_to_cafe(self)
     index = 0
     while index < len(res):
-        if res[index][0] > 1174 and res[index][1] < 134:
+        if (res[index][0] > 1174 and res[index][1] < 134) or res[index][1] > 580:
             res.pop(index)
         else:
             index += 1
