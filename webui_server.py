@@ -6,6 +6,7 @@ BAAS WebUI 后端
 """
 import argparse
 import asyncio
+import collections
 import json
 import os
 import queue
@@ -32,6 +33,7 @@ _state = {
     'resources': {'ap': 0, 'apMax': 180, 'pyroxene': 0, 'credits': 0},
 }
 _log_q: queue.Queue = queue.Queue()
+_log_history: collections.deque = collections.deque(maxlen=500)  # 历史日志回放
 _ws_clients: set[WebSocket] = set()
 _proc: Optional[subprocess.Popen] = None
 _config_dir: str = 'default'
@@ -55,6 +57,7 @@ def _read_stdout(proc: subprocess.Popen) -> None:
             msg_type = msg.get('type')
             if msg_type == 'log':
                 msg['data']['id'] = log_id
+                _log_history.append(msg)
                 _log_q.put(msg)
             elif msg_type == 'status':
                 _state.update(msg.get('data', {}))
@@ -79,10 +82,12 @@ def _read_stdout(proc: subprocess.Popen) -> None:
             if m:
                 _state['currentTask'] = m.group(1)
                 _log_q.put({'type': 'status', 'data': {'currentTask': _state['currentTask']}})
-        _log_q.put({'type': 'log', 'data': {
+        log_msg = {'type': 'log', 'data': {
             'id': log_id, 'level': level,
             'time': datetime.now().strftime('%H:%M:%S'), 'message': message
-        }})
+        }}
+        _log_history.append(log_msg)
+        _log_q.put(log_msg)
 
     _state['running'] = False
     _state['currentTask'] = None
@@ -318,7 +323,11 @@ async def ws_endpoint(ws: WebSocket):
     if _state['running'] and not (_proc is not None and _proc.poll() is None):
         _state['running'] = False
         _state['currentTask'] = None
+    # 发送当前状态
     await ws.send_json({'type': 'init', 'data': _state})
+    # 回放历史日志（最多 500 条）
+    if _log_history:
+        await ws.send_json({'type': 'history', 'data': list(_log_history)})
     try:
         while True:
             await ws.receive_text()
