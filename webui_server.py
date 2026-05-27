@@ -157,6 +157,7 @@ def _write_json(name: str, data: dict | list) -> None:
 def get_status():
     return _state
 
+
 @app.get('/api/tasks')
 def get_tasks():
     try:
