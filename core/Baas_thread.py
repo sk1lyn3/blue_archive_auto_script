@@ -729,8 +729,6 @@ class Baas_thread:
         if not self.flag_run:
             raise RequestHumanTakeOver
         self.logger.info(f"swipe from ( " + str(fx) + " , " + str(fy) + " ) --> ( " + str(tx) + " , " + str(ty) + " )")
-        if self.config.screenshot_method == "virtual_scrcpy":
-            duration = max(0.3, duration or 0.3)
         self.control.swipe(fx * self.ratio, fy * self.ratio, tx * self.ratio, ty * self.ratio, duration)
         if post_sleep_time > 0:
             time.sleep(post_sleep_time)
@@ -739,26 +737,9 @@ class Baas_thread:
         if not self.flag_run:
             raise RequestHumanTakeOver
         self.logger.info(f"swipe from ( " + str(fx) + " , " + str(fy) + " ) --> ( " + str(tx) + " , " + str(ty) + " )")
-        if self.config.screenshot_method == "virtual_scrcpy":
-            duration = max(1.5, duration or 0.3)
-            self.control.swipe(fx * self.ratio, fy * self.ratio, tx * self.ratio, ty * self.ratio, duration)
-        else:
-            self.u2.swipe(fx * self.ratio, fy * self.ratio, tx * self.ratio, ty * self.ratio, duration or 0.3)
+        self.u2.swipe(fx * self.ratio, fy * self.ratio, tx * self.ratio, ty * self.ratio, duration)
         if post_sleep_time > 0:
             time.sleep(post_sleep_time)
-
-    def pinch(self, cx, cy, spread_start, spread_end, steps=30):
-        if not self.flag_run:
-            raise RequestHumanTakeOver
-        if self.config.screenshot_method == "virtual_scrcpy":
-            from core.device.virtual_scrcpy_client import VirtualScrcpyClient
-            VirtualScrcpyClient.get_instance(self.serial).pinch(
-                int(cx * self.ratio), int(cy * self.ratio),
-                int(spread_start * self.ratio), int(spread_end * self.ratio),
-                steps
-            )
-        elif self.is_android_device:
-            self.u2().pinch_in(percent=int(spread_end / spread_start * 100), steps=steps)
 
     def get_ap(self, is_main_page=False):
         if is_main_page:
@@ -896,8 +877,6 @@ class Baas_thread:
                 self.flag_run = False
                 return False
 
-        self.refresh_common_tasks()
-        self.refresh_hard_tasks()
         self.logger.info("--------Initialization Finished----------")
         return True
 
@@ -1118,12 +1097,8 @@ class Baas_thread:
     def _get_android_device_resolution(self):
         self.u2_client = U2Client.get_instance(self.serial)
         self.u2 = self.u2_client.get_connection()
-        self.last_refresh_u2_time = time.time()
-        if self.config.screenshot_method == "virtual_scrcpy":
-            from core.device.virtual_u2_proxy import VirtualU2Proxy
-            self.u2 = VirtualU2Proxy(self.u2, self.serial)
-            return (1280, 720)
         self.check_atx()
+        self.last_refresh_u2_time = time.time()
         return self.resolution_uiautomator2()
 
     def resolution_uiautomator2(self):

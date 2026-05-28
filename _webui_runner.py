@@ -8,6 +8,10 @@ import sys
 import time
 from datetime import datetime
 
+# 在任何 BAAS 类被导入前注入 virtual_scrcpy 兼容补丁
+import core.virtual_scrcpy_compat
+core.virtual_scrcpy_compat.apply()
+
 # ── 自定义信号类（替代 PyQt 信号）────────────────────────────────────────────
 
 class _LogSignal:

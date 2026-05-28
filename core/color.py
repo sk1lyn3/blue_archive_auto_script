@@ -21,9 +21,6 @@ def wait_loading(self: Baas_thread) -> None:
     return
 
 
-_VIRTUAL_SCRCPY_TOLERANCE = 15
-
-
 def _get_rgb_at_index(self, row: int, col: int):
     img = self.latest_img_array
     if img is None or img.ndim < 3:
@@ -42,11 +39,6 @@ def _pixel_in_rgb_range(pixel, r_min, r_max, g_min, g_max, b_min, b_max):
 
 def rgb_in_range(self, x: int, y: int, r_min: int, r_max: int, g_min: int, g_max: int, b_min: int, b_max: int,
                  check_nearby=False, nearby_range=1):
-    tol = _VIRTUAL_SCRCPY_TOLERANCE if getattr(
-        getattr(self, 'config', None), 'screenshot_method', '') == 'virtual_scrcpy' else 0
-    r_min = max(0, r_min - tol); r_max = min(255, r_max + tol)
-    g_min = max(0, g_min - tol); g_max = min(255, g_max + tol)
-    b_min = max(0, b_min - tol); b_max = min(255, b_max + tol)
     row = int(y * self.ratio)
     col = int(x * self.ratio)
     pixel = _get_rgb_at_index(self, row, col)
