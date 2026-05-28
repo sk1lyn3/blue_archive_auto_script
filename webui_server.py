@@ -282,12 +282,9 @@ async def run_task(body: dict):
 
 @app.get('/api/activity')
 def get_activity():
-    static_path = os.path.join(os.path.dirname(__file__),
-                                'core', 'ocr', 'baas_ocr_client', 'bin', 'resource', 'static.json')
     try:
-        with open(static_path, encoding='utf-8') as f:
-            static = json.load(f)
-        activity_map: dict = static.get('current_game_activity', {})
+        from core.config.default_config import STATIC_DEFAULT_CONFIG
+        activity_map: dict = json.loads(STATIC_DEFAULT_CONFIG).get('current_game_activity', {})
     except Exception:
         return {'CN': None, 'JP': None, 'Global': None}
     result = {}
