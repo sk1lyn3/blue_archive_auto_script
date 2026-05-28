@@ -36,6 +36,7 @@ _log_q: queue.Queue = queue.Queue()
 _log_history: collections.deque = collections.deque(maxlen=500)  # 历史日志回放
 _ws_clients: set[WebSocket] = set()
 _proc: Optional[subprocess.Popen] = None
+_oneshot_proc: Optional[subprocess.Popen] = None  # 一次性任务进程
 _config_dir: str = 'default'
 
 # ── 子进程 stdout 读取 ──────────────────────────────────────────────────────
@@ -249,6 +250,60 @@ async def stop_script():
     _state['currentTask'] = None
     _log_q.put({'type': 'status', 'data': {'running': False, 'currentTask': None}})
     return {'ok': True}
+
+_ALLOWED_TASKS = {
+    'explore_activity_story', 'explore_activity_mission', 'explore_activity_challenge',
+    'explore_normal_task', 'explore_hard_task',
+}
+
+@app.post('/api/run-task')
+async def run_task(body: dict):
+    global _oneshot_proc
+    from fastapi import HTTPException
+    task = body.get('task', '').strip()
+    if task not in _ALLOWED_TASKS:
+        raise HTTPException(400, f'Unknown task: {task}')
+    if _proc and _proc.poll() is None:
+        raise HTTPException(409, '主调度器正在运行，请先停止')
+    if _oneshot_proc and _oneshot_proc.poll() is None:
+        raise HTTPException(409, '已有单次任务在运行')
+    runner = os.path.join(os.path.dirname(__file__), '_webui_runner.py')
+    env = {**os.environ, 'BAAS_CONFIG_DIR': _config_dir, 'BAAS_TASK': task,
+           'PYTHONUNBUFFERED': '1', 'NO_COLOR': '1', 'FORCE_COLOR': '0',
+           'QT_QPA_PLATFORM': 'offscreen'}
+    _oneshot_proc = subprocess.Popen(
+        [sys.executable, runner],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, env=env, cwd=os.path.dirname(__file__)
+    )
+    threading.Thread(target=_read_stdout, args=(_oneshot_proc,), daemon=True).start()
+    _log_q.put({'type': 'status', 'data': {'currentTask': task}})
+    return {'ok': True}
+
+@app.get('/api/activity')
+def get_activity():
+    static_path = os.path.join(os.path.dirname(__file__),
+                                'core', 'ocr', 'baas_ocr_client', 'bin', 'resource', 'static.json')
+    try:
+        with open(static_path, encoding='utf-8') as f:
+            static = json.load(f)
+        activity_map: dict = static.get('current_game_activity', {})
+    except Exception:
+        return {'CN': None, 'JP': None, 'Global': None}
+    result = {}
+    for server, name in activity_map.items():
+        if not name:
+            result[server] = None
+            continue
+        stage_path = os.path.join(os.path.dirname(__file__),
+                                   'src', 'explore_task_data', 'activities', f'{name}.json')
+        try:
+            with open(stage_path, encoding='utf-8') as f:
+                stages = json.load(f)
+        except Exception:
+            stages = {}
+        result[server] = {'name': name, 'stages': stages}
+    return result
 
 @app.get('/api/configs')
 def list_configs():

@@ -103,6 +103,14 @@ def main():
         log_signal.emit(3, '初始化失败，请检查设备连接和配置')
         sys.exit(1)
 
+    # 一次性任务模式：BAAS_TASK 指定任务名，执行完即退出
+    one_shot = os.environ.get('BAAS_TASK', '').strip()
+    if one_shot:
+        log_signal.emit(1, f'--- 单次任务模式: {one_shot} ---')
+        baas.solve(one_shot)
+        log_signal.emit(1, f'--- 任务完成: {one_shot} ---')
+        return
+
     # 定期汇报资源数据
     def _resource_reporter():
         while True:
