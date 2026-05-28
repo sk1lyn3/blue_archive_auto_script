@@ -59,10 +59,19 @@ def main():
         from main import Main
         from core.Baas_thread import Baas_thread
         from core.config.config_set import ConfigSet
+        from core.config.default_config import STATIC_DEFAULT_CONFIG
     except ImportError as e:
         log_signal.emit(3, f'导入 BAAS 失败: {e}')
         log_signal.emit(3, '请确认依赖已安装: pip install -r requirements-linux.txt')
         sys.exit(1)
+
+    # 用最新的 default_config 刷新 config/static.json（GUI 启动时由 window.py 完成，WebUI 需手动触发）
+    try:
+        static_json_path = os.path.join(os.path.dirname(__file__), 'config', 'static.json')
+        with open(static_json_path, 'w', encoding='utf-8') as _f:
+            _f.write(STATIC_DEFAULT_CONFIG)
+    except Exception as e:
+        log_signal.emit(2, f'刷新 static.json 失败（活动数据可能过旧）: {e}')
 
     log_signal.emit(1, '--- BAAS WebUI Runner 启动 ---')
 
