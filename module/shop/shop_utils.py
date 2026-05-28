@@ -124,6 +124,9 @@ def buy(self, buy_list, shop_type="common_shop"):
             break
         if last_checked_idx >= length:
             break
+        if not item_lines_y:
+            self.logger.warning("No items detected in shop, stopping buy loop.")
+            break
         last_checked_y -= swipe_get_y_diff(self, item_lines_y)
 
 def get_item_position(self, shop_type="common_shop"):
