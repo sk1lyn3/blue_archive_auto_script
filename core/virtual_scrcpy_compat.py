@@ -23,28 +23,34 @@ def _patch_control_factory():
     from core.device.Control import Control
     from core.device.control.virtual_scrcpy import VirtualScrcpyControl
 
-    _orig = Control.__init__
+    _orig = Control.init_control_instance
 
-    def _init(self, connection, method):
-        _orig(self, connection, method)
-        if method == 'virtual_scrcpy':
-            self.control_instance = VirtualScrcpyControl(connection)
+    def _init_control_instance(self):
+        if getattr(self.config, 'control_method', '') == 'virtual_scrcpy':
+            self.method = 'virtual_scrcpy'
+            self.logger.info("Control method : virtual_scrcpy")
+            self.control_instance = VirtualScrcpyControl(self.connection)
+            return
+        _orig(self)
 
-    Control.__init__ = _init
+    Control.init_control_instance = _init_control_instance
 
 
 def _patch_screenshot_factory():
     from core.device.Screenshot import Screenshot
     from core.device.screenshot.virtual_scrcpy import VirtualScrcpyScreenshot
 
-    _orig = Screenshot.__init__
+    _orig = Screenshot.init_screenshot_instance
 
-    def _init(self, connection, method):
-        _orig(self, connection, method)
-        if method == 'virtual_scrcpy':
-            self.screenshot_instance = VirtualScrcpyScreenshot(connection)
+    def _init_screenshot_instance(self):
+        if getattr(self.config, 'screenshot_method', '') == 'virtual_scrcpy':
+            self.method = 'virtual_scrcpy'
+            self.logger.info("Screenshot method : virtual_scrcpy")
+            self.screenshot_instance = VirtualScrcpyScreenshot(self.connection)
+            return
+        _orig(self)
 
-    Screenshot.__init__ = _init
+    Screenshot.init_screenshot_instance = _init_screenshot_instance
 
 
 # ── Connection ────────────────────────────────────────────────────────────────
