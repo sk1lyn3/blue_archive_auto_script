@@ -332,6 +332,29 @@ def get_static_config():
     except Exception:
         return {}
 
+
+@app.get('/api/help')
+def get_help(lang: str = 'zh_CN'):
+    lang = re.sub(r'[^A-Za-z0-9_-]', '', lang) or 'zh_CN'
+    base = os.path.join(os.path.dirname(__file__), 'src', 'descriptions')
+    docs_dir = os.path.join(base, lang)
+    if not os.path.isdir(docs_dir):
+        docs_dir = os.path.join(base, 'zh_CN')
+    docs = []
+    try:
+        for file_name in sorted(os.listdir(docs_dir)):
+            if not file_name.endswith('.html'):
+                continue
+            path = os.path.join(docs_dir, file_name)
+            with open(path, encoding='utf-8') as f:
+                docs.append({
+                    'title': os.path.splitext(file_name)[0],
+                    'content': f.read(),
+                })
+    except Exception:
+        return {'docs': []}
+    return {'docs': docs}
+
 @app.get('/api/configs')
 def list_configs():
     base = os.path.join(os.path.dirname(__file__), 'config')
