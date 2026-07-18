@@ -122,40 +122,26 @@ def _command_loop(baas, config_set, log_signal):
     def worker_alive():
         return worker is not None and worker.is_alive()
 
-    def run_worker(name, target):
+    def start_job(name, label, current_task, action):
         nonlocal worker
+
+        def _target():
+            try:
+                log_signal.emit(1, f'--- 常驻模式: {label}启动 ---')
+                _emit_status({'running': True, 'currentTask': current_task})
+                action()
+                log_signal.emit(1, f'--- 常驻模式: {label}结束 ---')
+            finally:
+                _emit_status({'running': False, 'currentTask': None})
+
         with worker_lock:
             if worker_alive():
                 log_signal.emit(2, '已有任务在运行，请先停止当前任务')
                 return False
             baas.flag_run = True
-            worker = threading.Thread(target=target, name=name, daemon=True)
+            worker = threading.Thread(target=_target, name=name, daemon=True)
             worker.start()
             return True
-
-    def run_scheduler():
-        def _target():
-            try:
-                log_signal.emit(1, '--- 常驻模式: 调度任务启动 ---')
-                _emit_status({'running': True, 'currentTask': None})
-                baas.thread_starter()
-            finally:
-                _emit_status({'running': False, 'currentTask': None})
-                log_signal.emit(1, '--- 常驻模式: 调度任务结束 ---')
-
-        return run_worker('baas-scheduler', _target)
-
-    def run_task(task):
-        def _target():
-            try:
-                log_signal.emit(1, f'--- 常驻模式: 单次任务启动: {task} ---')
-                _emit_status({'running': True, 'currentTask': task})
-                baas.solve(task)
-                log_signal.emit(1, f'--- 常驻模式: 单次任务结束: {task} ---')
-            finally:
-                _emit_status({'running': False, 'currentTask': None})
-
-        return run_worker(f'baas-task-{task}', _target)
 
     log_signal.emit(1, '--- 常驻模式: 虚拟屏幕已启动，等待任务命令 ---')
     _emit_virtual_display(_virtual_display_data(baas, config_set, running=True))
@@ -172,11 +158,11 @@ def _command_loop(baas, config_set, log_signal):
 
         cmd = msg.get('cmd')
         if cmd == 'start_scheduler':
-            run_scheduler()
+            start_job('baas-scheduler', '调度任务', None, baas.thread_starter)
         elif cmd == 'run_task':
             task = msg.get('task', '').strip()
             if task:
-                run_task(task)
+                start_job(f'baas-task-{task}', f'单次任务: {task}', task, lambda: baas.solve(task))
         elif cmd == 'stop_task':
             if worker_alive():
                 log_signal.emit(1, '停止当前任务请求已发送')

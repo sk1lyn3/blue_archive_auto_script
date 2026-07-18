@@ -25,13 +25,15 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+VIRTUAL_DISPLAY_IDLE = {'running': False, 'starting': False, 'displayId': None, 'configDir': None}
+
 # ── 全局状态 ─────────────────────────────────────────────────────────────────
 
 _state = {
     'running': False,
     'currentTask': None,
     'resources': {'ap': 0, 'apMax': 180, 'pyroxene': 0, 'credits': 0},
-    'virtualDisplay': {'running': False, 'starting': False, 'displayId': None, 'configDir': None},
+    'virtualDisplay': VIRTUAL_DISPLAY_IDLE.copy(),
 }
 _log_q: queue.Queue = queue.Queue()
 _log_history: collections.deque = collections.deque(maxlen=500)  # 历史日志回放
@@ -54,6 +56,37 @@ def _terminate_proc(proc: Optional[subprocess.Popen]) -> None:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
         proc.kill()
+
+def _set_status(**data) -> None:
+    _state.update(data)
+    _log_q.put({'type': 'status', 'data': data})
+
+def _set_idle_status() -> None:
+    _set_status(running=False, currentTask=None)
+
+def _set_virtual_display(**data) -> None:
+    _state['virtualDisplay'].update(data)
+    _log_q.put({'type': 'status', 'data': {'virtualDisplay': _state['virtualDisplay']}})
+
+def _reset_virtual_display() -> None:
+    _state['virtualDisplay'] = VIRTUAL_DISPLAY_IDLE.copy()
+    _log_q.put({'type': 'status', 'data': {'virtualDisplay': _state['virtualDisplay']}})
+
+def _runner_env(**extra: str) -> dict:
+    return {**os.environ, **extra,
+            'PYTHONUNBUFFERED': '1', 'NO_COLOR': '1', 'FORCE_COLOR': '0',
+            'QT_QPA_PLATFORM': 'offscreen'}
+
+def _start_runner(env: dict, persistent: bool = False) -> subprocess.Popen:
+    runner = os.path.join(os.path.dirname(__file__), '_webui_runner.py')
+    return subprocess.Popen(
+        [sys.executable, runner],
+        stdin=subprocess.PIPE if persistent else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True, env=env, cwd=os.path.dirname(__file__),
+        bufsize=1 if persistent else -1,
+    )
 
 def _active_screenshot_method() -> str:
     try:
@@ -135,15 +168,12 @@ def _read_stdout(proc: subprocess.Popen, role: str = 'task') -> None:
 
     if role == 'persistent' and _proc is proc:
         _proc = None
-        _state['virtualDisplay'] = {'running': False, 'starting': False, 'displayId': None, 'configDir': None}
-        _log_q.put({'type': 'status', 'data': {'virtualDisplay': _state['virtualDisplay']}})
+        _reset_virtual_display()
     elif role == 'oneshot' and _oneshot_proc is proc:
         _oneshot_proc = None
 
     if not _any_runner_alive():
-        _state['running'] = False
-        _state['currentTask'] = None
-        _log_q.put({'type': 'status', 'data': {'running': False, 'currentTask': None}})
+        _set_idle_status()
 
 # ── WebSocket 广播 ───────────────────────────────────────────────────────────
 
@@ -275,29 +305,15 @@ async def start_script(body: dict = {}):
         ok, err = _runner_cmd({'cmd': 'start_scheduler'})
         if not ok:
             return {'ok': False, 'error': err or '请先启动虚拟屏幕'}
-        _state['running'] = True
-        _state['currentTask'] = None
-        _log_q.put({'type': 'status', 'data': {'running': True, 'currentTask': None}})
+        _set_status(running=True, currentTask=None)
         return {'ok': True}
     if _any_runner_alive():
         return {'ok': False, 'error': '已在运行中'}
     if _state['running']:
-        _state['running'] = False
-        _state['currentTask'] = None
-        _log_q.put({'type': 'status', 'data': {'running': False, 'currentTask': None}})
-    runner = os.path.join(os.path.dirname(__file__), '_webui_runner.py')
-    env = {**os.environ, 'BAAS_CONFIG_DIR': cfg,
-           'PYTHONUNBUFFERED': '1', 'NO_COLOR': '1', 'FORCE_COLOR': '0',
-           'QT_QPA_PLATFORM': 'offscreen'}
-    _proc = subprocess.Popen(
-        [sys.executable, runner],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, env=env, cwd=os.path.dirname(__file__)
-    )
-    _state['running'] = True
-    _state['currentTask'] = None
+        _set_idle_status()
+    _proc = _start_runner(_runner_env(BAAS_CONFIG_DIR=cfg))
+    _set_status(running=True, currentTask=None)
     threading.Thread(target=_read_stdout, args=(_proc,), daemon=True).start()
-    _log_q.put({'type': 'status', 'data': {'running': True}})
     return {'ok': True}
 
 @app.post('/api/stop')
@@ -309,17 +325,13 @@ async def stop_script():
             return {'ok': False, 'error': err or '停止任务失败'}
         _terminate_proc(_oneshot_proc)
         _oneshot_proc = None
-        _state['running'] = False
-        _state['currentTask'] = None
-        _log_q.put({'type': 'status', 'data': {'running': False, 'currentTask': None}})
+        _set_idle_status()
         return {'ok': True}
     _terminate_proc(_proc)
     _terminate_proc(_oneshot_proc)
     _proc = None
     _oneshot_proc = None
-    _state['running'] = False
-    _state['currentTask'] = None
-    _log_q.put({'type': 'status', 'data': {'running': False, 'currentTask': None}})
+    _set_idle_status()
     return {'ok': True}
 
 _ALLOWED_TASKS = {
@@ -340,27 +352,15 @@ async def run_task(body: dict):
         ok, err = _runner_cmd({'cmd': 'run_task', 'task': task})
         if not ok:
             raise HTTPException(409, err or '请先启动虚拟屏幕')
-        _state['running'] = True
-        _state['currentTask'] = task
-        _log_q.put({'type': 'status', 'data': {'running': True, 'currentTask': task}})
+        _set_status(running=True, currentTask=task)
         return {'ok': True}
     if _proc_alive(_proc):
         raise HTTPException(409, '主调度器正在运行，请先停止')
     if _proc_alive(_oneshot_proc):
         raise HTTPException(409, '已有单次任务在运行')
-    runner = os.path.join(os.path.dirname(__file__), '_webui_runner.py')
-    env = {**os.environ, 'BAAS_CONFIG_DIR': _config_dir, 'BAAS_TASK': task,
-           'PYTHONUNBUFFERED': '1', 'NO_COLOR': '1', 'FORCE_COLOR': '0',
-           'QT_QPA_PLATFORM': 'offscreen'}
-    _oneshot_proc = subprocess.Popen(
-        [sys.executable, runner],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, env=env, cwd=os.path.dirname(__file__)
-    )
+    _oneshot_proc = _start_runner(_runner_env(BAAS_CONFIG_DIR=_config_dir, BAAS_TASK=task))
     threading.Thread(target=_read_stdout, args=(_oneshot_proc, 'oneshot'), daemon=True).start()
-    _state['running'] = True
-    _state['currentTask'] = task
-    _log_q.put({'type': 'status', 'data': {'running': True, 'currentTask': task}})
+    _set_status(running=True, currentTask=task)
     return {'ok': True}
 
 @app.post('/api/virtual-display/start')
@@ -380,19 +380,9 @@ async def start_virtual_display(body: dict = {}):
     if _proc_alive(_oneshot_proc):
         raise HTTPException(409, '已有单次任务在运行')
 
-    runner = os.path.join(os.path.dirname(__file__), '_webui_runner.py')
-    env = {**os.environ, 'BAAS_CONFIG_DIR': _config_dir, 'BAAS_PERSISTENT': '1',
-           'PYTHONUNBUFFERED': '1', 'NO_COLOR': '1', 'FORCE_COLOR': '0',
-           'QT_QPA_PLATFORM': 'offscreen'}
-    _state['virtualDisplay'] = {'running': False, 'starting': True, 'displayId': None, 'configDir': _config_dir}
-    _log_q.put({'type': 'status', 'data': {'virtualDisplay': _state['virtualDisplay']}})
-    _proc = subprocess.Popen(
-        [sys.executable, runner],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, env=env, cwd=os.path.dirname(__file__),
-        bufsize=1,
-    )
+    _state['virtualDisplay'] = VIRTUAL_DISPLAY_IDLE.copy()
+    _set_virtual_display(starting=True, configDir=_config_dir)
+    _proc = _start_runner(_runner_env(BAAS_CONFIG_DIR=_config_dir, BAAS_PERSISTENT='1'), persistent=True)
     threading.Thread(target=_read_stdout, args=(_proc, 'persistent'), daemon=True).start()
     return {'ok': True}
 
@@ -410,8 +400,7 @@ async def stop_virtual_display():
         except subprocess.TimeoutExpired:
             _terminate_proc(_proc)
         _proc = None
-    _state['virtualDisplay'] = {'running': False, 'starting': False, 'displayId': None, 'configDir': None}
-    _log_q.put({'type': 'status', 'data': {'virtualDisplay': _state['virtualDisplay']}})
+    _reset_virtual_display()
     return {'ok': True}
 
 @app.get('/api/activity')
