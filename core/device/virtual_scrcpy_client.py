@@ -1,10 +1,10 @@
 """
-VirtualScrcpyClient：虚拟屏截图 + adb 控制方案
+VirtualScrcpyClient：虚拟屏截图 + scrcpy 控制方案
 
 - 用 scrcpy-server v4.0 创建 Android 虚拟 display（new_display=1280x720）
-- 低帧率视频流（5fps）+ 缓存帧，screenshot() 极快（~0.2ms）
+- 低帧率视频流 + 缓存帧，screenshot() 极快（~0.2ms）
 - 操作后设 dirty flag，下次 screenshot() 才等新帧，契合 BAAS 的截图-操作-截图节奏
-- 虚拟屏控制用 adb input -d <display_id>（scrcpy v4.0 控制协议与旧客户端不兼容）
+- 虚拟屏控制走 scrcpy control socket；启动应用、查 display 仍通过 adb shell
 """
 import os
 import re
@@ -34,122 +34,146 @@ class VirtualScrcpyError(Exception):
 
 class VirtualScrcpyClient:
     _instances: dict = {}
+    _instances_lock = threading.Lock()
 
     def __init__(self, serial: str):
         self.serial = serial
         self._server_path = _get_server_v4_path()
         self._display_id: int | None = None
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._dirty = threading.Event()
         self._dirty.set()
-
-        device = adb.device(serial=serial)
-        displays_before = self._list_display_ids()
-
-        self._client = Client(device, max_width=1280, max_fps=STREAM_FPS)
-        self._patch_deploy(device)
-
-        try:
-            self._client.start(daemon_threaded=True)
-        except Exception as e:
-            raise VirtualScrcpyError(f"Failed to start virtual scrcpy: {e}")
-
-        self._wait_new_frame(timeout=10.0)
-        self._dirty.clear()
-
-        self._display_id = self._find_new_display(displays_before)
-        if self._display_id is None:
-            raise VirtualScrcpyError("Virtual display not found after start")
+        self._client: Client | None = None
+        self._start_session()
 
     @classmethod
     def get_instance(cls, serial: str) -> "VirtualScrcpyClient":
-        if serial not in cls._instances:
-            cls._instances[serial] = VirtualScrcpyClient(serial)
-        return cls._instances[serial]
+        with cls._instances_lock:
+            if serial not in cls._instances:
+                cls._instances[serial] = VirtualScrcpyClient(serial)
+            else:
+                cls._instances[serial].ensure_ready()
+            return cls._instances[serial]
 
     @classmethod
     def release_instance(cls, serial: str):
-        inst = cls._instances.pop(serial, None)
+        with cls._instances_lock:
+            inst = cls._instances.pop(serial, None)
         if inst:
-            inst._client.stop()
+            inst.stop()
+
+    @classmethod
+    def recreate_instance(cls, serial: str) -> "VirtualScrcpyClient":
+        with cls._instances_lock:
+            inst = cls._instances.get(serial)
+            if inst is None:
+                inst = VirtualScrcpyClient(serial)
+                cls._instances[serial] = inst
+                return inst
+        inst.recreate()
+        return inst
+
+    @classmethod
+    def release_all(cls):
+        with cls._instances_lock:
+            instances = list(cls._instances.values())
+            cls._instances.clear()
+        for inst in instances:
+            inst.stop()
+
+    def stop(self):
+        with self._lock:
+            self._stop_session()
 
     # ── 截图 ─────────────────────────────────────────────────────────────
 
     def screenshot(self):
-        frame_age = time.time() - self._client.last_frame_time
-        if self._dirty.is_set() or frame_age > 1.0 / STREAM_FPS:
-            self._wait_new_frame(FRAME_TIMEOUT)
-            self._dirty.clear()
-        frame = self._client.last_frame
-        if frame is None:
-            raise VirtualScrcpyError("No frame available")
-        return frame.copy()
+        with self._lock:
+            self.ensure_ready()
+            frame_age = time.time() - self._client.last_frame_time
+            if self._dirty.is_set() or frame_age > 1.0 / STREAM_FPS:
+                if not self._wait_new_frame(FRAME_TIMEOUT) and self._client.last_frame is None:
+                    self.recreate()
+                self._dirty.clear()
+            frame = self._client.last_frame
+            if frame is None:
+                raise VirtualScrcpyError("No frame available")
+            return frame.copy()
 
     def get_foreground_package(self) -> str:
         """查虚拟屏上的前台包名"""
-        out = subprocess.check_output(
-            ["adb", "-s", self.serial, "shell", "dumpsys", "activity", "activities"],
-            text=True
-        )
-        in_display = False
-        for line in out.split('\n'):
-            if f"Display #{self._display_id} " in line:
-                in_display = True
-            elif in_display and re.match(r'\s*Display #\d+', line):
-                in_display = False
-            if in_display and re.search(r'Hist\s+#0:', line):
-                m = re.search(r'([\w.]+)/[\w.$]+', line)
-                if m:
-                    return m.group(1)
-        return "unknown"
+        with self._lock:
+            self.ensure_ready()
+            display_id = self._display_id
+            out = subprocess.check_output(
+                ["adb", "-s", self.serial, "shell", "dumpsys", "activity", "activities"],
+                text=True
+            )
+            in_display = False
+            for line in out.split('\n'):
+                if f"Display #{display_id} " in line:
+                    in_display = True
+                elif in_display and re.match(r'\s*Display #\d+', line):
+                    in_display = False
+                if in_display and re.search(r'Hist\s+#0:', line):
+                    m = re.search(r'([\w.]+)/[\w.$]+', line)
+                    if m:
+                        return m.group(1)
+            return "unknown"
 
     def launch_app(self, package: str, activity: str = None):
         """在虚拟屏上启动应用"""
-        if activity:
-            cmd = f"am start --display {self._display_id} -n {package}/{activity}"
-        else:
-            cmd = f"am start --display {self._display_id} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p {package}"
-        self._adb(cmd)
+        with self._lock:
+            self.ensure_ready()
+            if activity:
+                cmd = f"am start --display {self._display_id} -n {package}/{activity}"
+            else:
+                cmd = f"am start --display {self._display_id} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p {package}"
+            self._adb(cmd)
 
     # ── 控制（走 scrcpy control socket，无 adb 子进程开销）────────────────
 
     def click(self, x, y):
         from core.device.scrcpy import const
-        ctrl = self._client.control
         with self._lock:
+            self.ensure_ready()
+            ctrl = self._client.control
             ctrl.touch(x, y, const.ACTION_DOWN)
             time.sleep(0.05)
             ctrl.touch(x, y, const.ACTION_UP)
-        self._dirty.set()
+            self._dirty.set()
 
     def swipe(self, x1, y1, x2, y2, duration):
         """duration 单位：秒"""
         from core.device.scrcpy import const
-        ctrl = self._client.control
-        dist = max(1, ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5)
-        steps = max(1, int(dist / 5))
-        delay = max(0.001, duration / steps)
         with self._lock:
+            self.ensure_ready()
+            ctrl = self._client.control
+            dist = max(1, ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5)
+            steps = max(1, int(dist / 5))
+            delay = max(0.001, duration / steps)
             ctrl.swipe(x1, y1, x2, y2,
                        move_step_length=5,
                        move_steps_delay=delay)
-        self._dirty.set()
+            self._dirty.set()
 
     def long_click(self, x, y, duration=1.0):
         from core.device.scrcpy import const
-        ctrl = self._client.control
         with self._lock:
+            self.ensure_ready()
+            ctrl = self._client.control
             ctrl.touch(x, y, const.ACTION_DOWN)
             time.sleep(duration)
             ctrl.touch(x, y, const.ACTION_UP)
-        self._dirty.set()
+            self._dirty.set()
 
     def pinch(self, cx, cy, spread_start, spread_end, steps=30):
         """双指捏合/张开。spread_start > spread_end = 缩小，反之放大。"""
         from core.device.scrcpy import const
-        ctrl = self._client.control
-        delay = 0.016
         with self._lock:
+            self.ensure_ready()
+            ctrl = self._client.control
+            delay = 0.016
             ctrl.touch(cx - spread_start, cy, const.ACTION_DOWN, touch_id=1)
             ctrl.touch(cx + spread_start, cy, const.ACTION_DOWN, touch_id=2)
             for i in range(1, steps + 1):
@@ -160,9 +184,77 @@ class VirtualScrcpyClient:
                 time.sleep(delay)
             ctrl.touch(cx - spread_end, cy, const.ACTION_UP, touch_id=1)
             ctrl.touch(cx + spread_end, cy, const.ACTION_UP, touch_id=2)
-        self._dirty.set()
+            self._dirty.set()
 
     # ── 内部 ─────────────────────────────────────────────────────────────
+
+    @property
+    def display_id(self) -> int | None:
+        return self._display_id
+
+    def ensure_ready(self):
+        with self._lock:
+            if self._session_alive():
+                return
+            self._restart_session()
+
+    def recreate(self):
+        with self._lock:
+            self._restart_session()
+
+    def _start_session(self):
+        device = adb.device(serial=self.serial)
+        displays_before = self._list_display_ids()
+
+        self._client = Client(device, max_width=1280, max_fps=STREAM_FPS)
+        self._patch_deploy(device)
+
+        try:
+            self._client.start(daemon_threaded=True)
+        except Exception as e:
+            self._client = None
+            raise VirtualScrcpyError(f"Failed to start virtual scrcpy: {e}")
+
+        if not self._wait_new_frame(timeout=10.0):
+            self._stop_session()
+            raise VirtualScrcpyError("No frame received from virtual scrcpy")
+        self._dirty.clear()
+
+        self._display_id = self._find_new_display(displays_before)
+        if self._display_id is None:
+            self._stop_session()
+            raise VirtualScrcpyError("Virtual display not found after start")
+
+    def _stop_session(self):
+        client = self._client
+        self._client = None
+        self._display_id = None
+        self._dirty.set()
+        if client:
+            try:
+                client.stop()
+            except Exception:
+                pass
+
+    def _restart_session(self):
+        self._stop_session()
+        time.sleep(0.2)
+        self._start_session()
+
+    def _session_alive(self) -> bool:
+        client = self._client
+        if client is None or not client.is_alive() or client.control_socket is None:
+            return False
+        if self._display_id is None:
+            return False
+        try:
+            if self._display_id not in self._list_display_ids():
+                return False
+        except Exception:
+            return False
+        if client.last_frame is None:
+            return False
+        return True
 
     def _adb(self, cmd: str):
         subprocess.run(["adb", "-s", self.serial, "shell", cmd], capture_output=True)
@@ -192,9 +284,10 @@ class VirtualScrcpyClient:
         deadline = time.time() + timeout
         now = time.time()
         while time.time() < deadline:
-            if self._client.last_frame is not None and self._client.last_frame_time > now:
-                return
+            if self._client is not None and self._client.last_frame is not None and self._client.last_frame_time > now:
+                return True
             time.sleep(0.01)
+        return False
 
     def _patch_deploy(self, device):
         server_path = self._server_path

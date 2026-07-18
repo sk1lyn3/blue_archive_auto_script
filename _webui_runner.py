@@ -4,6 +4,8 @@ stdout 输出 JSON Lines，webui_server.py 解析后转发给 WebSocket 客户�
 """
 import json
 import os
+import atexit
+import signal
 import sys
 import time
 from datetime import datetime
@@ -11,6 +13,24 @@ from datetime import datetime
 # 在任何 BAAS 类被导入前注入 virtual_scrcpy 兼容补丁
 import core.virtual_scrcpy_compat
 core.virtual_scrcpy_compat.apply()
+
+
+def _cleanup_virtual_scrcpy():
+    try:
+        from core.device.virtual_scrcpy_client import VirtualScrcpyClient
+        VirtualScrcpyClient.release_all()
+    except Exception:
+        pass
+
+
+def _handle_exit_signal(signum, _frame):
+    _cleanup_virtual_scrcpy()
+    sys.exit(128 + signum)
+
+
+atexit.register(_cleanup_virtual_scrcpy)
+signal.signal(signal.SIGTERM, _handle_exit_signal)
+signal.signal(signal.SIGINT, _handle_exit_signal)
 
 # ── 自定义信号类（替代 PyQt 信号）────────────────────────────────────────────
 
