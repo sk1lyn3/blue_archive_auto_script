@@ -31,6 +31,7 @@ _state = {
     'running': False,
     'currentTask': None,
     'resources': {'ap': 0, 'apMax': 180, 'pyroxene': 0, 'credits': 0},
+    'virtualDisplay': {'running': False, 'starting': False, 'displayId': None, 'configDir': None},
 }
 _log_q: queue.Queue = queue.Queue()
 _log_history: collections.deque = collections.deque(maxlen=500)  # 历史日志回放
@@ -54,11 +55,35 @@ def _terminate_proc(proc: Optional[subprocess.Popen]) -> None:
     except subprocess.TimeoutExpired:
         proc.kill()
 
+def _active_screenshot_method() -> str:
+    try:
+        return str(_read_json('config.json').get('screenshot_method', ''))
+    except Exception:
+        return ''
+
+def _uses_virtual_scrcpy() -> bool:
+    return _active_screenshot_method() == 'virtual_scrcpy'
+
+def _virtual_display_alive() -> bool:
+    vd = _state.get('virtualDisplay') or {}
+    return _proc_alive(_proc) and bool(vd.get('running') or vd.get('starting'))
+
+def _runner_cmd(cmd: dict) -> tuple[bool, str | None]:
+    if not _proc_alive(_proc) or _proc.stdin is None:
+        return False, '虚拟屏幕未启动'
+    try:
+        _proc.stdin.write(json.dumps(cmd, ensure_ascii=False) + '\n')
+        _proc.stdin.flush()
+        return True, None
+    except (BrokenPipeError, OSError) as e:
+        return False, str(e)
+
 # ── 子进程 stdout 读取 ──────────────────────────────────────────────────────
 
 ANSI = re.compile(r'\x1b\[[0-9;]*[mGKH]')
 
-def _read_stdout(proc: subprocess.Popen) -> None:
+def _read_stdout(proc: subprocess.Popen, role: str = 'task') -> None:
+    global _proc, _oneshot_proc
     log_id = int(time.time() * 1000)
     for raw in proc.stdout:
         line = ANSI.sub('', raw).strip()
@@ -81,6 +106,9 @@ def _read_stdout(proc: subprocess.Popen) -> None:
             elif msg_type == 'resource':
                 _state['resources'].update(msg.get('data', {}))
                 _log_q.put({'type': 'status', 'data': {'resources': _state['resources']}})
+            elif msg_type == 'virtual_display':
+                _state['virtualDisplay'].update(msg.get('data', {}))
+                _log_q.put({'type': 'status', 'data': {'virtualDisplay': _state['virtualDisplay']}})
             continue
         except (json.JSONDecodeError, KeyError):
             pass
@@ -104,6 +132,13 @@ def _read_stdout(proc: subprocess.Popen) -> None:
         }}
         _log_history.append(log_msg)
         _log_q.put(log_msg)
+
+    if role == 'persistent' and _proc is proc:
+        _proc = None
+        _state['virtualDisplay'] = {'running': False, 'starting': False, 'displayId': None, 'configDir': None}
+        _log_q.put({'type': 'status', 'data': {'virtualDisplay': _state['virtualDisplay']}})
+    elif role == 'oneshot' and _oneshot_proc is proc:
+        _oneshot_proc = None
 
     if not _any_runner_alive():
         _state['running'] = False
@@ -233,14 +268,23 @@ async def put_config(body: dict):
 @app.post('/api/start')
 async def start_script(body: dict = {}):
     global _proc, _config_dir
+    cfg = body.get('configDir', _config_dir)
+    if cfg:
+        _config_dir = cfg
+    if _uses_virtual_scrcpy():
+        ok, err = _runner_cmd({'cmd': 'start_scheduler'})
+        if not ok:
+            return {'ok': False, 'error': err or '请先启动虚拟屏幕'}
+        _state['running'] = True
+        _state['currentTask'] = None
+        _log_q.put({'type': 'status', 'data': {'running': True, 'currentTask': None}})
+        return {'ok': True}
     if _any_runner_alive():
         return {'ok': False, 'error': '已在运行中'}
     if _state['running']:
         _state['running'] = False
         _state['currentTask'] = None
         _log_q.put({'type': 'status', 'data': {'running': False, 'currentTask': None}})
-    cfg = body.get('configDir', _config_dir)
-    _config_dir = cfg
     runner = os.path.join(os.path.dirname(__file__), '_webui_runner.py')
     env = {**os.environ, 'BAAS_CONFIG_DIR': cfg,
            'PYTHONUNBUFFERED': '1', 'NO_COLOR': '1', 'FORCE_COLOR': '0',
@@ -259,6 +303,16 @@ async def start_script(body: dict = {}):
 @app.post('/api/stop')
 async def stop_script():
     global _proc, _oneshot_proc
+    if _virtual_display_alive():
+        ok, err = _runner_cmd({'cmd': 'stop_task'})
+        if not ok:
+            return {'ok': False, 'error': err or '停止任务失败'}
+        _terminate_proc(_oneshot_proc)
+        _oneshot_proc = None
+        _state['running'] = False
+        _state['currentTask'] = None
+        _log_q.put({'type': 'status', 'data': {'running': False, 'currentTask': None}})
+        return {'ok': True}
     _terminate_proc(_proc)
     _terminate_proc(_oneshot_proc)
     _proc = None
@@ -282,6 +336,14 @@ async def run_task(body: dict):
     task = body.get('task', '').strip()
     if task not in _ALLOWED_TASKS:
         raise HTTPException(400, f'Unknown task: {task}')
+    if _uses_virtual_scrcpy():
+        ok, err = _runner_cmd({'cmd': 'run_task', 'task': task})
+        if not ok:
+            raise HTTPException(409, err or '请先启动虚拟屏幕')
+        _state['running'] = True
+        _state['currentTask'] = task
+        _log_q.put({'type': 'status', 'data': {'running': True, 'currentTask': task}})
+        return {'ok': True}
     if _proc_alive(_proc):
         raise HTTPException(409, '主调度器正在运行，请先停止')
     if _proc_alive(_oneshot_proc):
@@ -295,10 +357,61 @@ async def run_task(body: dict):
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, env=env, cwd=os.path.dirname(__file__)
     )
-    threading.Thread(target=_read_stdout, args=(_oneshot_proc,), daemon=True).start()
+    threading.Thread(target=_read_stdout, args=(_oneshot_proc, 'oneshot'), daemon=True).start()
     _state['running'] = True
     _state['currentTask'] = task
     _log_q.put({'type': 'status', 'data': {'running': True, 'currentTask': task}})
+    return {'ok': True}
+
+@app.post('/api/virtual-display/start')
+async def start_virtual_display(body: dict = {}):
+    global _proc, _config_dir
+    from fastapi import HTTPException
+    cfg = body.get('configDir', _config_dir)
+    if cfg:
+        _config_dir = cfg
+    if not _uses_virtual_scrcpy():
+        raise HTTPException(400, '当前配置未使用 virtual_scrcpy')
+    if _proc_alive(_proc):
+        ok, err = _runner_cmd({'cmd': 'virtual_status'})
+        if not ok:
+            return {'ok': False, 'error': err or '虚拟屏幕状态查询失败'}
+        return {'ok': True}
+    if _proc_alive(_oneshot_proc):
+        raise HTTPException(409, '已有单次任务在运行')
+
+    runner = os.path.join(os.path.dirname(__file__), '_webui_runner.py')
+    env = {**os.environ, 'BAAS_CONFIG_DIR': _config_dir, 'BAAS_PERSISTENT': '1',
+           'PYTHONUNBUFFERED': '1', 'NO_COLOR': '1', 'FORCE_COLOR': '0',
+           'QT_QPA_PLATFORM': 'offscreen'}
+    _state['virtualDisplay'] = {'running': False, 'starting': True, 'displayId': None, 'configDir': _config_dir}
+    _log_q.put({'type': 'status', 'data': {'virtualDisplay': _state['virtualDisplay']}})
+    _proc = subprocess.Popen(
+        [sys.executable, runner],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, env=env, cwd=os.path.dirname(__file__),
+        bufsize=1,
+    )
+    threading.Thread(target=_read_stdout, args=(_proc, 'persistent'), daemon=True).start()
+    return {'ok': True}
+
+@app.post('/api/virtual-display/stop')
+async def stop_virtual_display():
+    global _proc
+    if _state.get('running'):
+        return {'ok': False, 'error': '任务运行中，请先停止任务'}
+    if _proc_alive(_proc):
+        ok, err = _runner_cmd({'cmd': 'shutdown_virtual_display'})
+        if not ok:
+            return {'ok': False, 'error': err or '关闭虚拟屏幕失败'}
+        try:
+            _proc.wait(timeout=8)
+        except subprocess.TimeoutExpired:
+            _terminate_proc(_proc)
+        _proc = None
+    _state['virtualDisplay'] = {'running': False, 'starting': False, 'displayId': None, 'configDir': None}
+    _log_q.put({'type': 'status', 'data': {'virtualDisplay': _state['virtualDisplay']}})
     return {'ok': True}
 
 @app.get('/api/activity')

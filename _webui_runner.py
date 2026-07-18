@@ -7,6 +7,7 @@ import os
 import atexit
 import signal
 import sys
+import threading
 import time
 from datetime import datetime
 
@@ -60,10 +61,136 @@ class _UpdateSignal:
         task = item if isinstance(item, str) else item.get('event_name', str(item))
         print(json.dumps({'type': 'status', 'data': {'currentTask': task}}), flush=True)
 
+
+def _emit_status(data: dict) -> None:
+    print(json.dumps({'type': 'status', 'data': data}), flush=True)
+
+
+def _emit_virtual_display(data: dict) -> None:
+    print(json.dumps({'type': 'virtual_display', 'data': data}), flush=True)
+
+
+def _virtual_display_data(baas=None, config_set=None, running=True) -> dict:
+    data = {'running': running, 'starting': False}
+    try:
+        if config_set is not None:
+            data['configDir'] = os.path.basename(config_set.config_dir)
+        if running and baas is not None and getattr(baas.config, 'screenshot_method', '') == 'virtual_scrcpy':
+            from core.device.virtual_scrcpy_client import VirtualScrcpyClient
+            cli = VirtualScrcpyClient.get_instance(baas.serial)
+            data['displayId'] = cli.display_id
+    except Exception:
+        pass
+    return data
+
+
+def _start_resource_reporter(config_set):
+    def _resource_reporter():
+        while True:
+            time.sleep(30)
+            try:
+                ap_data = config_set.get('ap') or {}
+                pyr_data = config_set.get('pyroxene') or {}
+                crd_data = config_set.get('creditpoints') or {}
+                print(json.dumps({'type': 'resource', 'data': {
+                    'ap':       ap_data.get('count', 0),
+                    'apMax':    ap_data.get('max', 180),
+                    'pyroxene': pyr_data.get('count', 0),
+                    'credits':  crd_data.get('count', 0),
+                }}), flush=True)
+            except Exception:
+                pass
+
+    threading.Thread(target=_resource_reporter, daemon=True).start()
+
+
+def _command_loop(baas, config_set, log_signal):
+    worker = None
+    worker_lock = threading.Lock()
+
+    def worker_alive():
+        return worker is not None and worker.is_alive()
+
+    def run_worker(name, target):
+        nonlocal worker
+        with worker_lock:
+            if worker_alive():
+                log_signal.emit(2, '已有任务在运行，请先停止当前任务')
+                return False
+            baas.flag_run = True
+            worker = threading.Thread(target=target, name=name, daemon=True)
+            worker.start()
+            return True
+
+    def run_scheduler():
+        def _target():
+            try:
+                log_signal.emit(1, '--- 常驻模式: 调度任务启动 ---')
+                _emit_status({'running': True, 'currentTask': None})
+                baas.thread_starter()
+            finally:
+                _emit_status({'running': False, 'currentTask': None})
+                log_signal.emit(1, '--- 常驻模式: 调度任务结束 ---')
+
+        return run_worker('baas-scheduler', _target)
+
+    def run_task(task):
+        def _target():
+            try:
+                log_signal.emit(1, f'--- 常驻模式: 单次任务启动: {task} ---')
+                _emit_status({'running': True, 'currentTask': task})
+                baas.solve(task)
+                log_signal.emit(1, f'--- 常驻模式: 单次任务结束: {task} ---')
+            finally:
+                _emit_status({'running': False, 'currentTask': None})
+
+        return run_worker(f'baas-task-{task}', _target)
+
+    log_signal.emit(1, '--- 常驻模式: 虚拟屏幕已启动，等待任务命令 ---')
+    _emit_virtual_display(_virtual_display_data(baas, config_set, running=True))
+
+    for raw in sys.stdin:
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            msg = json.loads(raw)
+        except json.JSONDecodeError:
+            log_signal.emit(2, f'忽略无效命令: {raw}')
+            continue
+
+        cmd = msg.get('cmd')
+        if cmd == 'start_scheduler':
+            run_scheduler()
+        elif cmd == 'run_task':
+            task = msg.get('task', '').strip()
+            if task:
+                run_task(task)
+        elif cmd == 'stop_task':
+            if worker_alive():
+                log_signal.emit(1, '停止当前任务请求已发送')
+                baas.flag_run = False
+            else:
+                log_signal.emit(1, '当前没有正在运行的任务')
+            _emit_status({'running': False, 'currentTask': None})
+        elif cmd == 'virtual_status':
+            _emit_virtual_display(_virtual_display_data(baas, config_set, running=True))
+        elif cmd == 'shutdown_virtual_display':
+            if worker_alive():
+                log_signal.emit(2, '任务运行中，请先停止任务再关闭虚拟屏幕')
+                continue
+            log_signal.emit(1, '--- 常驻模式: 关闭虚拟屏幕 ---')
+            _emit_virtual_display(_virtual_display_data(baas, config_set, running=False))
+            _cleanup_virtual_scrcpy()
+            return
+        else:
+            log_signal.emit(2, f'未知命令: {cmd}')
+
 # ── 主流程 ────────────────────────────────────────────────────────────────────
 
 def main():
     config_dir = os.environ.get('BAAS_CONFIG_DIR', 'default')
+    persistent = os.environ.get('BAAS_PERSISTENT', '') == '1'
 
     log_signal    = _LogSignal()
     button_signal = _ButtonSignal()
@@ -136,6 +263,11 @@ def main():
         log_signal.emit(3, '初始化失败，请检查设备连接和配置')
         sys.exit(1)
 
+    if persistent:
+        _start_resource_reporter(config_set)
+        _command_loop(baas, config_set, log_signal)
+        return
+
     # 一次性任务模式：BAAS_TASK 指定任务名，执行完即退出
     one_shot = os.environ.get('BAAS_TASK', '').strip()
     if one_shot:
@@ -145,24 +277,7 @@ def main():
         return
 
     # 定期汇报资源数据
-    def _resource_reporter():
-        while True:
-            time.sleep(30)
-            try:
-                ap_data = config_set.get('ap') or {}
-                pyr_data = config_set.get('pyroxene') or {}
-                crd_data = config_set.get('creditpoints') or {}
-                print(json.dumps({'type': 'resource', 'data': {
-                    'ap':       ap_data.get('count', 0),
-                    'apMax':    ap_data.get('max', 180),
-                    'pyroxene': pyr_data.get('count', 0),
-                    'credits':  crd_data.get('count', 0),
-                }}), flush=True)
-            except Exception:
-                pass
-
-    import threading
-    threading.Thread(target=_resource_reporter, daemon=True).start()
+    _start_resource_reporter(config_set)
 
     baas.thread_starter()
 
