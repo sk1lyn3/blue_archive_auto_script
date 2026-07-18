@@ -1,0 +1,37 @@
+<h2>virtual_scrcpy 常驻虚拟屏幕说明</h2>
+
+<p>当截图方式设置为 <strong>virtual_scrcpy</strong> 时，WebUI 首页会把“虚拟屏幕”和“任务运行”分开控制。</p>
+
+<h3>推荐流程</h3>
+<ol>
+  <li>先点击 <strong>启动虚拟屏幕</strong>。</li>
+  <li>等待状态显示为 <strong>Display 数字</strong>，此时游戏已经启动到该虚拟屏幕。</li>
+  <li>再点击 <strong>档案，启动！</strong> 或在设置页运行普通图、困难图、活动图等单次任务。</li>
+  <li>任务卡住时点击 <strong>停止</strong>，只停止当前任务，不关闭虚拟屏幕。</li>
+  <li>不再使用时点击 <strong>关闭虚拟屏幕</strong>，释放 scrcpy 会话和虚拟 display。</li>
+</ol>
+
+<h3>连接虚拟屏幕查看画面</h3>
+<p>启动虚拟屏幕后，首页会显示 Display ID。可以用本机 scrcpy 连接对应虚拟屏幕查看或手动操作：</p>
+
+<pre>scrcpy -s 设备地址 --display-id=DisplayID</pre>
+
+<p>例如：</p>
+
+<pre>scrcpy -s 10.29.245.15:10086 --display-id=123</pre>
+
+<p>如果你的 scrcpy 版本不支持 <code>--display-id</code>，可以尝试：</p>
+
+<pre>scrcpy -s 10.29.245.15:10086 --display 123</pre>
+
+<h3>和传统 adb 模式的区别</h3>
+<p>传统 adb/uiautomator2 模式通常直接操作主屏幕 display 0，只要设备在线就能继续连接。</p>
+
+<p>virtual_scrcpy 会创建独立虚拟屏幕，并通过 scrcpy control socket 点击、滑动和截图。因此它需要先启动常驻虚拟屏幕；之后任务会复用同一个虚拟 display，停止任务不会销毁它。</p>
+
+<h3>注意事项</h3>
+<ul>
+  <li>切换配置、切换设备或修改截图方式后，建议关闭并重新启动虚拟屏幕。</li>
+  <li>关闭虚拟屏幕前需要先停止当前任务。</li>
+  <li>凌晨维护重启游戏时，virtual_scrcpy 会重建会话并把游戏重新启动到新的虚拟屏幕。</li>
+</ul>
