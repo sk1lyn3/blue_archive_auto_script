@@ -39,6 +39,21 @@ _proc: Optional[subprocess.Popen] = None
 _oneshot_proc: Optional[subprocess.Popen] = None  # 一次性任务进程
 _config_dir: str = 'default'
 
+def _proc_alive(proc: Optional[subprocess.Popen]) -> bool:
+    return proc is not None and proc.poll() is None
+
+def _any_runner_alive() -> bool:
+    return _proc_alive(_proc) or _proc_alive(_oneshot_proc)
+
+def _terminate_proc(proc: Optional[subprocess.Popen]) -> None:
+    if not _proc_alive(proc):
+        return
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+
 # ── 子进程 stdout 读取 ──────────────────────────────────────────────────────
 
 ANSI = re.compile(r'\x1b\[[0-9;]*[mGKH]')
@@ -90,9 +105,10 @@ def _read_stdout(proc: subprocess.Popen) -> None:
         _log_history.append(log_msg)
         _log_q.put(log_msg)
 
-    _state['running'] = False
-    _state['currentTask'] = None
-    _log_q.put({'type': 'status', 'data': {'running': False, 'currentTask': None}})
+    if not _any_runner_alive():
+        _state['running'] = False
+        _state['currentTask'] = None
+        _log_q.put({'type': 'status', 'data': {'running': False, 'currentTask': None}})
 
 # ── WebSocket 广播 ───────────────────────────────────────────────────────────
 
@@ -127,7 +143,7 @@ async def lifespan(app: FastAPI):
         for pid_str in result.stdout.split():
             try:
                 os.kill(int(pid_str), 15)  # SIGTERM
-            except (ProcessLookupError, ValueError):
+            except (ProcessLookupError, PermissionError, ValueError):
                 pass
     except FileNotFoundError:
         pass  # pgrep 不存在则跳过
@@ -217,10 +233,9 @@ async def put_config(body: dict):
 @app.post('/api/start')
 async def start_script(body: dict = {}):
     global _proc, _config_dir
-    proc_alive = _proc is not None and _proc.poll() is None
-    if proc_alive:
+    if _any_runner_alive():
         return {'ok': False, 'error': '已在运行中'}
-    if _state['running'] and not proc_alive:
+    if _state['running']:
         _state['running'] = False
         _state['currentTask'] = None
         _log_q.put({'type': 'status', 'data': {'running': False, 'currentTask': None}})
@@ -243,9 +258,11 @@ async def start_script(body: dict = {}):
 
 @app.post('/api/stop')
 async def stop_script():
-    global _proc
-    if _proc and _proc.poll() is None:
-        _proc.terminate()
+    global _proc, _oneshot_proc
+    _terminate_proc(_proc)
+    _terminate_proc(_oneshot_proc)
+    _proc = None
+    _oneshot_proc = None
     _state['running'] = False
     _state['currentTask'] = None
     _log_q.put({'type': 'status', 'data': {'running': False, 'currentTask': None}})
@@ -254,6 +271,8 @@ async def stop_script():
 _ALLOWED_TASKS = {
     'explore_activity_story', 'explore_activity_mission', 'explore_activity_challenge',
     'explore_normal_task', 'explore_hard_task',
+    'main_story', 'group_story', 'mini_story',
+    'de_clothes',
 }
 
 @app.post('/api/run-task')
@@ -263,9 +282,9 @@ async def run_task(body: dict):
     task = body.get('task', '').strip()
     if task not in _ALLOWED_TASKS:
         raise HTTPException(400, f'Unknown task: {task}')
-    if _proc and _proc.poll() is None:
+    if _proc_alive(_proc):
         raise HTTPException(409, '主调度器正在运行，请先停止')
-    if _oneshot_proc and _oneshot_proc.poll() is None:
+    if _proc_alive(_oneshot_proc):
         raise HTTPException(409, '已有单次任务在运行')
     runner = os.path.join(os.path.dirname(__file__), '_webui_runner.py')
     env = {**os.environ, 'BAAS_CONFIG_DIR': _config_dir, 'BAAS_TASK': task,
@@ -277,7 +296,9 @@ async def run_task(body: dict):
         text=True, env=env, cwd=os.path.dirname(__file__)
     )
     threading.Thread(target=_read_stdout, args=(_oneshot_proc,), daemon=True).start()
-    _log_q.put({'type': 'status', 'data': {'currentTask': task}})
+    _state['running'] = True
+    _state['currentTask'] = task
+    _log_q.put({'type': 'status', 'data': {'running': True, 'currentTask': task}})
     return {'ok': True}
 
 @app.get('/api/activity')
@@ -301,6 +322,15 @@ def get_activity():
             stages = {}
         result[server] = {'name': name, 'stages': stages}
     return result
+
+
+@app.get('/api/static-config')
+def get_static_config():
+    try:
+        with open(os.path.join(os.path.dirname(__file__), 'config', 'static.json'), encoding='utf-8') as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
 @app.get('/api/configs')
 def list_configs():
@@ -372,7 +402,7 @@ async def ws_endpoint(ws: WebSocket):
     await ws.accept()
     _ws_clients.add(ws)
     # 连接时校正运行状态：进程已退出但状态未清除时修正
-    if _state['running'] and not (_proc is not None and _proc.poll() is None):
+    if _state['running'] and not _any_runner_alive():
         _state['running'] = False
         _state['currentTask'] = None
     # 发送当前状态

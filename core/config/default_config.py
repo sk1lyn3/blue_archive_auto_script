@@ -3577,7 +3577,7 @@ STATIC_DEFAULT_CONFIG = '''
         "日服": "com.YostarJP.BlueArchive"
     },
     "activity_name": {
-        "官服": "com.yostar.sdk.bridge.YoStarUnityPlayerActivity",
+        "官服": "com.tech.core.TechSplashActivity",
         "B服": "com.yostar.sdk.bridge.YoStarUnityPlayerActivity",
         "国际服": ".MxUnityPlayerActivity",
         "国际服青少年": ".MxUnityPlayerActivity",
