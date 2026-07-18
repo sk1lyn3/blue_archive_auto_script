@@ -104,6 +104,17 @@ def _start_resource_reporter(config_set):
     threading.Thread(target=_resource_reporter, daemon=True).start()
 
 
+def _launch_game_on_virtual_display(baas, log_signal):
+    if getattr(baas.config, 'screenshot_method', '') != 'virtual_scrcpy':
+        return
+    from core.device.virtual_scrcpy_client import VirtualScrcpyClient
+
+    activity_name = baas.activity_name
+    cli = VirtualScrcpyClient.get_instance(baas.serial)
+    log_signal.emit(1, 'Launch game on virtual display')
+    cli.launch_app(baas.package_name, activity_name)
+
+
 def _command_loop(baas, config_set, log_signal):
     worker = None
     worker_lock = threading.Lock()
@@ -265,6 +276,7 @@ def main():
 
     if persistent:
         _start_resource_reporter(config_set)
+        _launch_game_on_virtual_display(baas, log_signal)
         _command_loop(baas, config_set, log_signal)
         return
 
