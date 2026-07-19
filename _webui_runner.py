@@ -122,17 +122,18 @@ def _wake_unlock_and_turn_screen_off(baas, config_set, log_signal):
         return False
     try:
         serial = baas.serial
-        subprocess.run(
-            ['adb', '-s', serial, 'shell', 'input', 'keyevent', 'KEYCODE_WAKEUP'],
-            capture_output=True,
-            timeout=5,
-        )
-        subprocess.run(
-            ['adb', '-s', serial, 'shell', 'wm', 'dismiss-keyguard'],
-            capture_output=True,
-            timeout=5,
-        )
-        time.sleep(0.2)
+        if _physical_display_state(serial) == 'OFF':
+            subprocess.run(
+                ['adb', '-s', serial, 'shell', 'input', 'keyevent', 'KEYCODE_WAKEUP'],
+                capture_output=True,
+                timeout=5,
+            )
+            subprocess.run(
+                ['adb', '-s', serial, 'shell', 'wm', 'dismiss-keyguard'],
+                capture_output=True,
+                timeout=5,
+            )
+            time.sleep(0.2)
 
         from core.device.virtual_scrcpy_client import VirtualScrcpyClient
         cli = VirtualScrcpyClient.get_instance(serial)
@@ -143,6 +144,24 @@ def _wake_unlock_and_turn_screen_off(baas, config_set, log_signal):
     except Exception as e:
         log_signal.emit(3, f'唤醒解锁并关屏失败: {e}')
         return False
+
+
+def _physical_display_state(serial):
+    result = subprocess.run(
+        ['adb', '-s', serial, 'shell', 'dumpsys', 'display'],
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    for line in result.stdout.splitlines():
+        if 'DisplayDeviceInfo{"内置屏幕"' not in line:
+            continue
+        if 'state OFF' in line:
+            return 'OFF'
+        if 'state ON' in line:
+            return 'ON'
+        return 'UNKNOWN'
+    return 'UNKNOWN'
 
 
 def _send_power_key(serial, log_signal):
