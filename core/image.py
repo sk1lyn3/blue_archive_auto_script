@@ -9,6 +9,10 @@ from core.utils import merge_nearby_coordinates
 def screenshot_cut(self, area):
     # template is from 1280 * 720 screenshot, if real screenshot is 2560 * 1440, then ratio is 2.0
     # cut the same area from real screenshot
+    if self.latest_img_array is None:
+        self.update_screenshot_array()
+    if self.latest_img_array is None:
+        raise RuntimeError("No screenshot available.")
     return self.latest_img_array[
            int(area[1] * self.ratio):int(area[3] * self.ratio),
            int(area[0] * self.ratio):int(area[2] * self.ratio), :]

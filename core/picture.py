@@ -74,10 +74,11 @@ def co_detect(
 
     while self.flag_run:
         current_time = time.time()
-        if skip_first_screenshot:
+        if skip_first_screenshot and self.latest_img_array is not None:
             skip_first_screenshot = False
         else:
             self.update_screenshot_array()
+            skip_first_screenshot = False
         # time out check
         if current_time - start_time > time_out:
             raise FunctionCallTimeout("Co_detect function timeout reached.")
