@@ -6,6 +6,7 @@ import json
 import os
 import atexit
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -115,12 +116,89 @@ def _launch_game_on_virtual_display(baas, log_signal):
     cli.launch_app(baas.package_name, activity_name)
 
 
-def _command_loop(baas, config_set, log_signal):
+def _wake_unlock_and_turn_screen_off(baas, config_set, log_signal):
+    if getattr(baas.config, 'screenshot_method', '') != 'virtual_scrcpy':
+        log_signal.emit(3, '当前配置未使用 virtual_scrcpy')
+        return False
+    try:
+        serial = baas.serial
+        subprocess.run(
+            ['adb', '-s', serial, 'shell', 'input', 'keyevent', 'KEYCODE_WAKEUP'],
+            capture_output=True,
+            timeout=5,
+        )
+        subprocess.run(
+            ['adb', '-s', serial, 'shell', 'wm', 'dismiss-keyguard'],
+            capture_output=True,
+            timeout=5,
+        )
+        time.sleep(0.2)
+
+        from core.device.virtual_scrcpy_client import VirtualScrcpyClient
+        cli = VirtualScrcpyClient.get_instance(serial)
+        cli.turn_screen_off()
+        log_signal.emit(1, 'Wake/unlock device and turn physical screen off')
+        _emit_virtual_display(_virtual_display_data(baas, config_set, running=True))
+        return True
+    except Exception as e:
+        log_signal.emit(3, f'唤醒解锁并关屏失败: {e}')
+        return False
+
+
+def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
     worker = None
     worker_lock = threading.Lock()
 
     def worker_alive():
         return worker is not None and worker.is_alive()
+
+    def ensure_config(config_dir):
+        nonlocal baas, config_set
+        if not config_dir:
+            config_dir = os.path.basename(config_set.config_dir)
+        if worker_alive():
+            log_signal.emit(2, '已有任务在运行，请先停止当前任务')
+            return False
+        current_dir = os.path.basename(config_set.config_dir)
+        if config_dir != current_dir:
+            try:
+                from core.config.config_set import ConfigSet
+                log_signal.emit(1, f'常驻模式切换配置: {current_dir} -> {config_dir}')
+                new_config_set = ConfigSet(config_dir=config_dir)
+                new_baas = baas.__class__(new_config_set, log_signal, button_signal, update_signal, None)
+                new_baas.set_ocr(baas.ocr)
+                if not new_baas.init_all_data():
+                    log_signal.emit(3, f'配置 {config_dir} 初始化失败')
+                    return False
+                baas = new_baas
+                config_set = new_config_set
+                _emit_virtual_display(_virtual_display_data(baas, config_set, running=True))
+            except Exception as e:
+                log_signal.emit(3, f'切换配置失败: {e}')
+                return False
+        if getattr(baas.config, 'screenshot_method', '') != 'virtual_scrcpy':
+            log_signal.emit(3, f'配置 {config_dir} 未使用 virtual_scrcpy')
+            return False
+        return ensure_virtual_display_package()
+
+    def ensure_virtual_display_package():
+        try:
+            from core.device.virtual_scrcpy_client import VirtualScrcpyClient
+            cli = VirtualScrcpyClient.get_instance(baas.serial)
+            current_package = cli.get_foreground_package()
+            log_signal.emit(1, f'Virtual display foreground package: {current_package}')
+            if current_package != baas.package_name:
+                log_signal.emit(
+                    1,
+                    f'Launch target package on current virtual display: {baas.package_name}'
+                )
+                cli.launch_app(baas.package_name, baas.activity_name)
+                time.sleep(1)
+            _emit_virtual_display(_virtual_display_data(baas, config_set, running=True))
+            return True
+        except Exception as e:
+            log_signal.emit(3, f'虚拟屏幕包名检查失败: {e}')
+            return False
 
     def start_job(name, label, current_task, action):
         nonlocal worker
@@ -158,10 +236,11 @@ def _command_loop(baas, config_set, log_signal):
 
         cmd = msg.get('cmd')
         if cmd == 'start_scheduler':
-            start_job('baas-scheduler', '调度任务', None, baas.thread_starter)
+            if ensure_config(msg.get('configDir')):
+                start_job('baas-scheduler', '调度任务', None, baas.thread_starter)
         elif cmd == 'run_task':
             task = msg.get('task', '').strip()
-            if task:
+            if task and ensure_config(msg.get('configDir')):
                 start_job(f'baas-task-{task}', f'单次任务: {task}', task, lambda: baas.solve(task))
         elif cmd == 'stop_task':
             if worker_alive():
@@ -172,6 +251,8 @@ def _command_loop(baas, config_set, log_signal):
             _emit_status({'running': False, 'currentTask': None})
         elif cmd == 'virtual_status':
             _emit_virtual_display(_virtual_display_data(baas, config_set, running=True))
+        elif cmd == 'wake_unlock_screen_off':
+            _wake_unlock_and_turn_screen_off(baas, config_set, log_signal)
         elif cmd == 'shutdown_virtual_display':
             if worker_alive():
                 log_signal.emit(2, '任务运行中，请先停止任务再关闭虚拟屏幕')
@@ -263,7 +344,7 @@ def main():
     if persistent:
         _start_resource_reporter(config_set)
         _launch_game_on_virtual_display(baas, log_signal)
-        _command_loop(baas, config_set, log_signal)
+        _command_loop(baas, config_set, log_signal, button_signal, update_signal)
         return
 
     # 一次性任务模式：BAAS_TASK 指定任务名，执行完即退出

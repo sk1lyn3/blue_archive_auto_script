@@ -131,6 +131,13 @@ class VirtualScrcpyClient:
                 cmd = f"am start --display {self._display_id} -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -p {package}"
             self._adb(cmd)
 
+    def turn_screen_off(self):
+        """通过当前 scrcpy control session 关闭物理屏显示。"""
+        from core.device.scrcpy import const
+        with self._lock:
+            self.ensure_ready()
+            self._client.control.set_screen_power_mode(const.POWER_MODE_OFF)
+
     # ── 控制（走 scrcpy control socket，无 adb 子进程开销）────────────────
 
     def click(self, x, y):

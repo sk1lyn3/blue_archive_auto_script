@@ -302,7 +302,7 @@ async def start_script(body: dict = {}):
     if cfg:
         _config_dir = cfg
     if _uses_virtual_scrcpy():
-        ok, err = _runner_cmd({'cmd': 'start_scheduler'})
+        ok, err = _runner_cmd({'cmd': 'start_scheduler', 'configDir': _config_dir})
         if not ok:
             return {'ok': False, 'error': err or '请先启动虚拟屏幕'}
         _set_status(running=True, currentTask=None)
@@ -343,13 +343,16 @@ _ALLOWED_TASKS = {
 
 @app.post('/api/run-task')
 async def run_task(body: dict):
-    global _oneshot_proc
+    global _oneshot_proc, _config_dir
     from fastapi import HTTPException
+    cfg = body.get('configDir', _config_dir)
+    if cfg:
+        _config_dir = cfg
     task = body.get('task', '').strip()
     if task not in _ALLOWED_TASKS:
         raise HTTPException(400, f'Unknown task: {task}')
     if _uses_virtual_scrcpy():
-        ok, err = _runner_cmd({'cmd': 'run_task', 'task': task})
+        ok, err = _runner_cmd({'cmd': 'run_task', 'task': task, 'configDir': _config_dir})
         if not ok:
             raise HTTPException(409, err or '请先启动虚拟屏幕')
         _set_status(running=True, currentTask=task)
@@ -401,6 +404,18 @@ async def stop_virtual_display():
             _terminate_proc(_proc)
         _proc = None
     _reset_virtual_display()
+    return {'ok': True}
+
+@app.post('/api/virtual-display/wake-unlock-screen-off')
+async def wake_unlock_screen_off():
+    from fastapi import HTTPException
+    if not _uses_virtual_scrcpy():
+        raise HTTPException(400, '当前配置未使用 virtual_scrcpy')
+    if not _virtual_display_alive():
+        raise HTTPException(409, '虚拟屏幕未启动')
+    ok, err = _runner_cmd({'cmd': 'wake_unlock_screen_off'})
+    if not ok:
+        raise HTTPException(409, err or '唤醒解锁并关屏失败')
     return {'ok': True}
 
 @app.get('/api/activity')
