@@ -145,6 +145,18 @@ def _wake_unlock_and_turn_screen_off(baas, config_set, log_signal):
         return False
 
 
+def _send_power_key(serial, log_signal):
+    try:
+        subprocess.run(
+            ['adb', '-s', serial, 'shell', 'input', 'keyevent', 'KEYCODE_POWER'],
+            capture_output=True,
+            timeout=5,
+        )
+        log_signal.emit(1, 'Send power key before virtual display shutdown')
+    except Exception as e:
+        log_signal.emit(2, f'发送电源键失败: {e}')
+
+
 def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
     worker = None
     worker_lock = threading.Lock()
@@ -258,6 +270,7 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
                 log_signal.emit(2, '任务运行中，请先停止任务再关闭虚拟屏幕')
                 continue
             log_signal.emit(1, '--- 常驻模式: 关闭虚拟屏幕 ---')
+            _send_power_key(baas.serial, log_signal)
             _emit_virtual_display(_virtual_display_data(baas, config_set, running=False))
             _cleanup_virtual_scrcpy()
             return
