@@ -353,7 +353,10 @@ def main():
             'JP':     ['ja-jp', 'en-us'],
             'Global': ['en-us', 'ko-kr', 'zh-tw', 'ja-jp'],
         }
-        ocr_needed = _server_lang.get(_server, ['zh-cn', 'en-us'])
+        if persistent:
+            ocr_needed = ['zh-cn', 'en-us', 'ja-jp', 'ko-kr', 'zh-tw']
+        else:
+            ocr_needed = _server_lang.get(_server, ['zh-cn', 'en-us'])
         log_signal.emit(1, f'服务器: {_server}，加载 OCR 语言: {ocr_needed}')
         main_instance = Main(logger_signal=log_signal, ocr_needed=ocr_needed)
     except Exception as e:
