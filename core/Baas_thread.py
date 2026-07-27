@@ -104,6 +104,7 @@ class Baas_thread:
         self.last_refresh_u2_time = 0
         self.latest_img_array = None
         self.global_delayed_news_checked = False
+        self.global_delayed_news_attempts = 0
         self.total_assault_difficulty_names = ["NORMAL", "HARD", "VERYHARD", "HARDCORE", "EXTREME", "INSANE", "TORMENT"]
         self.button_signal = button_signal
         self.update_signal = update_signal
@@ -701,15 +702,23 @@ class Baas_thread:
     def close_delayed_global_news(self):
         if self.server != "Global" or self.global_delayed_news_checked:
             return False
-        self.global_delayed_news_checked = True
-        time.sleep(1.5)
-        self.update_screenshot_array()
-        if not self.global_news_close_button_visible():
+        if self.global_delayed_news_attempts >= 4:
             return False
-        x, y = 1216, 43
-        self.logger.info(f"Delayed Global news close -> Click @ ({x},{y})")
-        self.click(x, y)
-        return True
+
+        for _ in range(4 - self.global_delayed_news_attempts):
+            self.global_delayed_news_attempts += 1
+            time.sleep(0.75)
+            self.update_screenshot_array()
+            if not self.global_news_close_button_visible():
+                continue
+            self.global_delayed_news_checked = True
+            x, y = 1213, 42
+            self.logger.info(
+                f"Delayed Global news close attempt {self.global_delayed_news_attempts} -> Click @ ({x},{y})"
+            )
+            self.click(x, y)
+            return True
+        return False
 
     def global_news_close_button_visible(self):
         if self.latest_img_array is None:
