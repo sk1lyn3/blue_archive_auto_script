@@ -71,6 +71,18 @@ def _emit_virtual_display(data: dict) -> None:
     print(json.dumps({'type': 'virtual_display', 'data': data}), flush=True)
 
 
+def _emit_managed_mode(**data) -> None:
+    status = {
+        'running': False,
+        'configs': [],
+        'currentConfig': None,
+        'nextWakeAt': None,
+        'phase': 'idle',
+    }
+    status.update(data)
+    _emit_status({'managedMode': status})
+
+
 def _virtual_display_data(baas=None, config_set=None, running=True) -> dict:
     data = {'running': running, 'starting': False}
     try:
@@ -176,6 +188,106 @@ def _send_power_key(serial, log_signal):
         log_signal.emit(2, f'发送电源键失败: {e}')
 
 
+def _turn_physical_screen_off(serial, log_signal):
+    state = _physical_display_state(serial)
+    if state == 'OFF':
+        log_signal.emit(1, 'Physical screen already off for managed idle')
+        return True
+    try:
+        subprocess.run(
+            ['adb', '-s', serial, 'shell', 'input', 'keyevent', 'KEYCODE_POWER'],
+            capture_output=True,
+            timeout=5,
+        )
+        log_signal.emit(1, 'Turn physical screen off for managed idle')
+        return True
+    except Exception as e:
+        log_signal.emit(2, f'托管待机息屏失败: {e}')
+        return False
+
+
+def _config_event_path(config_dir):
+    return os.path.join(os.path.dirname(__file__), 'config', config_dir, 'event.json')
+
+
+def _read_config_events(config_dir):
+    with open(_config_event_path(config_dir), encoding='utf-8') as f:
+        return json.load(f)
+
+
+def _seconds_since_midnight():
+    now = datetime.now()
+    return now.hour * 3600 + now.minute * 60 + now.second
+
+
+def _event_disabled_now(event):
+    current = _seconds_since_midnight()
+    for period in event.get('disabled_time_range', []):
+        if len(period) != 2:
+            continue
+        start = period[0][0] * 3600 + period[0][1] * 60 + period[0][2]
+        end = period[1][0] * 3600 + period[1][1] * 60 + period[1][2]
+        if start <= current <= end:
+            return True
+    return False
+
+
+def _due_events(config_dir):
+    now = time.time()
+    events = [
+        event for event in _read_config_events(config_dir)
+        if event.get('enabled') and event.get('next_tick', 0) <= now and not _event_disabled_now(event)
+    ]
+    return sorted(events, key=lambda event: event.get('priority', 0))
+
+
+def _next_enabled_tick(config_dirs):
+    now = time.time()
+    ticks = []
+    for config_dir in config_dirs:
+        try:
+            for event in _read_config_events(config_dir):
+                if not event.get('enabled') or _event_disabled_now(event):
+                    continue
+                tick = int(event.get('next_tick', 0))
+                if tick > now:
+                    ticks.append(tick)
+                elif tick > 0:
+                    ticks.append(int(now))
+        except Exception:
+            continue
+    return min(ticks) if ticks else None
+
+
+def _find_due_config(config_dirs, start_idx):
+    if not config_dirs:
+        return None, None, start_idx
+    for offset in range(len(config_dirs)):
+        idx = (start_idx + offset) % len(config_dirs)
+        config_dir = config_dirs[idx]
+        try:
+            events = _due_events(config_dir)
+        except Exception:
+            events = []
+        if events:
+            return config_dir, events[0], idx
+    return None, None, start_idx
+
+
+def _force_stop_game(baas, log_signal):
+    try:
+        subprocess.run(
+            ['adb', '-s', baas.serial, 'shell', 'am', 'force-stop', baas.package_name],
+            capture_output=True,
+            timeout=8,
+        )
+        log_signal.emit(1, f'Exit game package for managed idle: {baas.package_name}')
+        return True
+    except Exception as e:
+        log_signal.emit(2, f'托管待机退出游戏失败: {e}')
+        return False
+
+
 def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
     worker = None
     worker_lock = threading.Lock()
@@ -183,11 +295,11 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
     def worker_alive():
         return worker is not None and worker.is_alive()
 
-    def ensure_config(config_dir):
+    def ensure_config(config_dir, allow_worker=False):
         nonlocal baas, config_set
         if not config_dir:
             config_dir = os.path.basename(config_set.config_dir)
-        if worker_alive():
+        if worker_alive() and not allow_worker:
             log_signal.emit(2, '已有任务在运行，请先停止当前任务')
             return False
         current_dir = os.path.basename(config_set.config_dir)
@@ -240,8 +352,12 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
                 _emit_status({'running': True, 'currentTask': current_task})
                 action()
                 log_signal.emit(1, f'--- 常驻模式: {label}结束 ---')
+            except Exception as e:
+                log_signal.emit(3, f'常驻模式任务异常: {e}')
             finally:
                 _emit_status({'running': False, 'currentTask': None})
+                if name == 'baas-managed':
+                    _emit_managed_mode()
 
         with worker_lock:
             if worker_alive():
@@ -251,6 +367,126 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
             worker = threading.Thread(target=_target, name=name, daemon=True)
             worker.start()
             return True
+
+    def run_one_scheduled_event(config_dir, event_hint):
+        if not ensure_config(config_dir, allow_worker=True):
+            return False
+        _wake_unlock_and_turn_screen_off(baas, config_set, log_signal)
+        if not ensure_virtual_display_package():
+            return False
+
+        baas.flag_run = True
+        if not baas.solve('restart'):
+            log_signal.emit(3, f'托管模式初始化主界面失败: {config_dir}')
+            return False
+
+        next_task = baas.scheduler.heartbeat()
+        if not next_task:
+            return True
+
+        event_label = event_hint.get('event_name', next_task['current_task']) if event_hint else next_task['current_task']
+        _emit_status({
+            'running': True,
+            'currentTask': f'{config_dir} · {event_label}',
+            'managedMode': {
+                'running': True,
+                'configs': managed_configs,
+                'currentConfig': config_dir,
+                'nextWakeAt': None,
+                'phase': 'running',
+            }
+        })
+        baas.task_finish_to_main_page = True
+        baas.daily_config_refresh()
+        if time.time() - baas.last_refresh_u2_time > 10800:
+            if not baas.solve('refresh_uiautomator2'):
+                return False
+        baas.genScheduleLog(next_task)
+
+        task_with_log_info = []
+        for task in next_task['pre_task']:
+            task_with_log_info.append((task, 'pre_task'))
+        task_with_log_info.append((next_task['current_task'], 'current_task'))
+        for task in next_task['post_task']:
+            task_with_log_info.append((task, 'post_task'))
+
+        current_task_next_time = 0
+        for task, task_type in task_with_log_info:
+            if not baas.flag_run:
+                return False
+            current_task = task_type == 'current_task'
+            log_signal.emit(1, f'{task_type}: [ {task} ] start')
+            if current_task:
+                baas.next_time = 0
+            if not baas.solve(task):
+                return False
+            if current_task:
+                current_task_next_time = baas.next_time
+
+        if baas.flag_run:
+            next_tick = baas.scheduler.systole(next_task['current_task'], current_task_next_time)
+            log_signal.emit(1, next_task['current_task'] + ' next_time : ' + str(next_tick))
+
+        if baas.task_finish_to_main_page and baas.flag_run:
+            log_signal.emit(1, 'managed event finished, return to main page')
+            baas.to_main_page()
+            baas.main_page_update_data()
+            baas.task_finish_to_main_page = False
+        return baas.flag_run
+
+    def enter_managed_idle():
+        _force_stop_game(baas, log_signal)
+        _turn_physical_screen_off(baas.serial, log_signal)
+
+    managed_configs = []
+
+    def managed_loop(config_dirs):
+        nonlocal managed_configs
+        managed_configs = list(config_dirs)
+        cursor = 0
+        idle_low_power = False
+        log_signal.emit(1, f'--- 托管模式启动: {managed_configs} ---')
+        _emit_managed_mode(running=True, configs=managed_configs, phase='starting')
+        while baas.flag_run:
+            config_dir, event, idx = _find_due_config(managed_configs, cursor)
+            if config_dir:
+                idle_low_power = False
+                cursor = (idx + 1) % len(managed_configs)
+                event_name = event.get('event_name', event.get('func_name', '调度任务'))
+                log_signal.emit(1, f'托管模式执行: {config_dir} · {event_name}')
+                ok = run_one_scheduled_event(config_dir, event)
+                if not ok:
+                    log_signal.emit(3, '托管模式任务失败，停止托管')
+                    baas.flag_run = False
+                    break
+                continue
+
+            next_wake = _next_enabled_tick(managed_configs)
+            _emit_status({
+                'running': True,
+                'currentTask': '托管待机',
+                'managedMode': {
+                    'running': True,
+                    'configs': managed_configs,
+                    'currentConfig': None,
+                    'nextWakeAt': next_wake,
+                    'phase': 'idle',
+                }
+            })
+            if not idle_low_power:
+                log_signal.emit(1, '托管模式无到点任务，退出游戏并息屏待机')
+                enter_managed_idle()
+                idle_low_power = True
+
+            wait_time = 30
+            if next_wake:
+                wait_time = max(1, min(30, int(next_wake - time.time())))
+            for _ in range(wait_time):
+                if not baas.flag_run:
+                    break
+                time.sleep(1)
+
+        log_signal.emit(1, '--- 托管模式结束 ---')
 
     log_signal.emit(1, '--- 常驻模式: 虚拟屏幕已启动，等待任务命令 ---')
     _emit_virtual_display(_virtual_display_data(baas, config_set, running=True))
@@ -269,6 +505,26 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
         if cmd == 'start_scheduler':
             if ensure_config(msg.get('configDir')):
                 start_job('baas-scheduler', '调度任务', None, baas.thread_starter)
+        elif cmd == 'start_managed':
+            configs = msg.get('configs') or []
+            configs = [str(config).strip() for config in configs if str(config).strip()]
+            configs = list(dict.fromkeys(configs))
+            if not configs:
+                log_signal.emit(2, '托管模式未选择配置文件')
+                continue
+            _emit_status({
+                'running': True,
+                'currentTask': '托管待机',
+                'managedMode': {
+                    'running': True,
+                    'configs': configs,
+                    'currentConfig': None,
+                    'nextWakeAt': None,
+                    'phase': 'starting',
+                }
+            })
+            if not start_job('baas-managed', '托管模式', '托管待机', lambda: managed_loop(configs)):
+                _emit_managed_mode()
         elif cmd == 'run_task':
             task = msg.get('task', '').strip()
             if task and ensure_config(msg.get('configDir')):
@@ -280,6 +536,7 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
             else:
                 log_signal.emit(1, '当前没有正在运行的任务')
             _emit_status({'running': False, 'currentTask': None})
+            _emit_managed_mode()
         elif cmd == 'virtual_status':
             _emit_virtual_display(_virtual_display_data(baas, config_set, running=True))
         elif cmd == 'wake_unlock_screen_off':

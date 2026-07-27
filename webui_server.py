@@ -26,6 +26,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 VIRTUAL_DISPLAY_IDLE = {'running': False, 'starting': False, 'displayId': None, 'configDir': None}
+MANAGED_MODE_IDLE = {
+    'running': False,
+    'configs': [],
+    'currentConfig': None,
+    'nextWakeAt': None,
+    'phase': 'idle',
+}
 
 # ── 全局状态 ─────────────────────────────────────────────────────────────────
 
@@ -34,6 +41,7 @@ _state = {
     'currentTask': None,
     'resources': {'ap': 0, 'apMax': 180, 'pyroxene': 0, 'credits': 0},
     'virtualDisplay': VIRTUAL_DISPLAY_IDLE.copy(),
+    'managedMode': MANAGED_MODE_IDLE.copy(),
 }
 _log_q: queue.Queue = queue.Queue()
 _log_history: collections.deque = collections.deque(maxlen=500)  # 历史日志回放
@@ -47,6 +55,9 @@ def _proc_alive(proc: Optional[subprocess.Popen]) -> bool:
 
 def _any_runner_alive() -> bool:
     return _proc_alive(_proc) or _proc_alive(_oneshot_proc)
+
+def _managed_mode_running() -> bool:
+    return bool((_state.get('managedMode') or {}).get('running'))
 
 def _terminate_proc(proc: Optional[subprocess.Popen]) -> None:
     if not _proc_alive(proc):
@@ -72,6 +83,14 @@ def _reset_virtual_display() -> None:
     _state['virtualDisplay'] = VIRTUAL_DISPLAY_IDLE.copy()
     _log_q.put({'type': 'status', 'data': {'virtualDisplay': _state['virtualDisplay']}})
 
+def _set_managed_mode(**data) -> None:
+    _state['managedMode'].update(data)
+    _log_q.put({'type': 'status', 'data': {'managedMode': _state['managedMode']}})
+
+def _reset_managed_mode() -> None:
+    _state['managedMode'] = MANAGED_MODE_IDLE.copy()
+    _log_q.put({'type': 'status', 'data': {'managedMode': _state['managedMode']}})
+
 def _runner_env(**extra: str) -> dict:
     return {**os.environ, **extra,
             'PYTHONUNBUFFERED': '1', 'NO_COLOR': '1', 'FORCE_COLOR': '0',
@@ -94,12 +113,31 @@ def _active_screenshot_method() -> str:
     except Exception:
         return ''
 
+def _config_screenshot_method(config_dir: str) -> str:
+    try:
+        with open(_cfg_path_for(config_dir, 'config.json'), encoding='utf-8') as f:
+            return str(json.load(f).get('screenshot_method', ''))
+    except Exception:
+        return ''
+
 def _uses_virtual_scrcpy() -> bool:
     return _active_screenshot_method() == 'virtual_scrcpy'
 
 def _virtual_display_alive() -> bool:
     vd = _state.get('virtualDisplay') or {}
     return _proc_alive(_proc) and bool(vd.get('running') or vd.get('starting'))
+
+def _virtual_display_running() -> bool:
+    vd = _state.get('virtualDisplay') or {}
+    return _proc_alive(_proc) and bool(vd.get('running')) and not bool(vd.get('starting'))
+
+async def _wait_virtual_display_running(timeout: float = 60.0) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if _virtual_display_running():
+            return True
+        await asyncio.sleep(0.5)
+    return False
 
 def _runner_cmd(cmd: dict) -> tuple[bool, str | None]:
     if not _proc_alive(_proc) or _proc.stdin is None:
@@ -169,6 +207,7 @@ def _read_stdout(proc: subprocess.Popen, role: str = 'task') -> None:
     if role == 'persistent' and _proc is proc:
         _proc = None
         _reset_virtual_display()
+        _reset_managed_mode()
     elif role == 'oneshot' and _oneshot_proc is proc:
         _oneshot_proc = None
 
@@ -223,6 +262,10 @@ app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_methods=['*'],
 
 def _cfg_path(name: str) -> str:
     base = os.path.join(os.path.dirname(__file__), 'config', _config_dir)
+    return os.path.join(base, name)
+
+def _cfg_path_for(config_dir: str, name: str) -> str:
+    base = os.path.join(os.path.dirname(__file__), 'config', config_dir)
     return os.path.join(base, name)
 
 def _read_json(name: str) -> dict | list:
@@ -298,6 +341,8 @@ async def put_config(body: dict):
 @app.post('/api/start')
 async def start_script(body: dict = {}):
     global _proc, _config_dir
+    if _managed_mode_running():
+        return {'ok': False, 'error': '托管模式正在运行，请先停止托管模式'}
     cfg = body.get('configDir', _config_dir)
     if cfg:
         _config_dir = cfg
@@ -326,12 +371,14 @@ async def stop_script():
         _terminate_proc(_oneshot_proc)
         _oneshot_proc = None
         _set_idle_status()
+        _reset_managed_mode()
         return {'ok': True}
     _terminate_proc(_proc)
     _terminate_proc(_oneshot_proc)
     _proc = None
     _oneshot_proc = None
     _set_idle_status()
+    _reset_managed_mode()
     return {'ok': True}
 
 _ALLOWED_TASKS = {
@@ -345,6 +392,8 @@ _ALLOWED_TASKS = {
 async def run_task(body: dict):
     global _oneshot_proc, _config_dir
     from fastapi import HTTPException
+    if _managed_mode_running():
+        raise HTTPException(409, '托管模式正在运行，请先停止托管模式')
     cfg = body.get('configDir', _config_dir)
     if cfg:
         _config_dir = cfg
@@ -392,6 +441,8 @@ async def start_virtual_display(body: dict = {}):
 @app.post('/api/virtual-display/stop')
 async def stop_virtual_display():
     global _proc
+    if _managed_mode_running():
+        return {'ok': False, 'error': '托管模式运行中，请先停止托管模式'}
     if _state.get('running'):
         return {'ok': False, 'error': '任务运行中，请先停止任务'}
     if _proc_alive(_proc):
@@ -404,6 +455,66 @@ async def stop_virtual_display():
             _terminate_proc(_proc)
         _proc = None
     _reset_virtual_display()
+    return {'ok': True}
+
+@app.get('/api/managed-mode/status')
+def managed_mode_status():
+    return _state['managedMode']
+
+@app.post('/api/managed-mode/start')
+async def start_managed_mode(body: dict):
+    global _proc, _config_dir
+    from fastapi import HTTPException
+    if _managed_mode_running():
+        raise HTTPException(409, '托管模式已在运行')
+    configs = body.get('configs') or []
+    if not isinstance(configs, list):
+        raise HTTPException(400, 'configs must be a list')
+    configs = [str(c).strip() for c in configs if str(c).strip()]
+    configs = list(dict.fromkeys(configs))
+    if not configs:
+        raise HTTPException(400, '至少选择一个配置文件')
+    base = os.path.join(os.path.dirname(__file__), 'config')
+    for cfg in configs:
+        if not os.path.isdir(os.path.join(base, cfg)):
+            raise HTTPException(404, f'配置不存在: {cfg}')
+        if _config_screenshot_method(cfg) != 'virtual_scrcpy':
+            raise HTTPException(400, f'配置 {cfg} 未使用 virtual_scrcpy')
+    if _proc_alive(_oneshot_proc):
+        raise HTTPException(409, '已有单次任务在运行')
+    if _state.get('running') and not _managed_mode_running():
+        raise HTTPException(409, '已有任务在运行')
+
+    _config_dir = configs[0]
+    started_runner = False
+    if not _proc_alive(_proc):
+        _state['virtualDisplay'] = VIRTUAL_DISPLAY_IDLE.copy()
+        _set_virtual_display(starting=True, configDir=_config_dir)
+        _proc = _start_runner(_runner_env(BAAS_CONFIG_DIR=_config_dir, BAAS_PERSISTENT='1'), persistent=True)
+        threading.Thread(target=_read_stdout, args=(_proc, 'persistent'), daemon=True).start()
+        started_runner = True
+
+    if started_runner or not _virtual_display_running():
+        if not await _wait_virtual_display_running():
+            raise HTTPException(504, '虚拟屏幕启动超时')
+
+    ok, err = _runner_cmd({'cmd': 'start_managed', 'configs': configs})
+    if not ok:
+        raise HTTPException(409, err or '托管模式启动失败')
+    _set_status(running=True, currentTask='托管待机')
+    _set_managed_mode(running=True, configs=configs, currentConfig=None, nextWakeAt=None, phase='starting')
+    return {'ok': True}
+
+@app.post('/api/managed-mode/stop')
+async def stop_managed_mode():
+    if not _managed_mode_running() and not _virtual_display_alive():
+        _reset_managed_mode()
+        return {'ok': True}
+    ok, err = _runner_cmd({'cmd': 'stop_task'})
+    if not ok:
+        return {'ok': False, 'error': err or '托管模式停止失败'}
+    _set_idle_status()
+    _reset_managed_mode()
     return {'ok': True}
 
 @app.post('/api/virtual-display/wake-unlock-screen-off')
