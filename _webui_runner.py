@@ -451,14 +451,23 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
             config_dir, event, idx = _find_due_config(managed_configs, cursor)
             if config_dir:
                 idle_low_power = False
+                log_signal.emit(1, f'托管模式批处理配置: {config_dir}')
+                while baas.flag_run:
+                    try:
+                        due = _due_events(config_dir)
+                    except Exception:
+                        due = []
+                    if not due:
+                        break
+                    event = due[0]
+                    event_name = event.get('event_name', event.get('func_name', '调度任务'))
+                    log_signal.emit(1, f'托管模式执行: {config_dir} · {event_name}')
+                    ok = run_one_scheduled_event(config_dir, event)
+                    if not ok:
+                        log_signal.emit(3, '托管模式任务失败，停止托管')
+                        baas.flag_run = False
+                        break
                 cursor = (idx + 1) % len(managed_configs)
-                event_name = event.get('event_name', event.get('func_name', '调度任务'))
-                log_signal.emit(1, f'托管模式执行: {config_dir} · {event_name}')
-                ok = run_one_scheduled_event(config_dir, event)
-                if not ok:
-                    log_signal.emit(3, '托管模式任务失败，停止托管')
-                    baas.flag_run = False
-                    break
                 continue
 
             next_wake = _next_enabled_tick(managed_configs)
