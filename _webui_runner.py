@@ -274,28 +274,65 @@ def _find_due_config(config_dirs, start_idx):
     return None, None, start_idx
 
 
-def _force_stop_game(baas, log_signal):
-    packages = [baas.package_name]
+def _config_package(config_dir, log_signal):
+    try:
+        from core.config.default_config import STATIC_DEFAULT_CONFIG
+        static_config = json.loads(STATIC_DEFAULT_CONFIG)
+        config_path = os.path.join(os.path.dirname(__file__), 'config', config_dir, 'config.json')
+        with open(config_path, encoding='utf-8') as f:
+            server = json.load(f).get('server')
+        return static_config.get('package_name', {}).get(server)
+    except Exception as e:
+        log_signal.emit(2, f'读取托管配置包名失败: {config_dir}: {e}')
+        return None
+
+
+def _managed_config_packages(config_dirs, log_signal):
+    packages = []
+    for config_dir in config_dirs:
+        package = _config_package(config_dir, log_signal)
+        if package and package not in packages:
+            packages.append(package)
+    return packages
+
+
+def _virtual_foreground_package(serial, log_signal):
     try:
         from core.device.virtual_scrcpy_client import VirtualScrcpyClient
-        foreground = VirtualScrcpyClient.get_instance(baas.serial).get_foreground_package()
-        if foreground not in ('unknown', 'com.android.launcher') and foreground not in packages:
-            packages.append(foreground)
+        return VirtualScrcpyClient.get_instance(serial).get_foreground_package()
     except Exception as e:
         log_signal.emit(2, f'托管待机读取前台包失败: {e}')
+        return 'unknown'
+
+
+def _force_stop_game(baas, log_signal, extra_packages=None):
+    packages = [baas.package_name]
+    for package in extra_packages or []:
+        if package and package not in packages:
+            packages.append(package)
 
     ok = True
-    for package in packages:
-        try:
-            subprocess.run(
-                ['adb', '-s', baas.serial, 'shell', 'am', 'force-stop', package],
-                capture_output=True,
-                timeout=8,
-            )
-            log_signal.emit(1, f'Exit game package for managed idle: {package}')
-        except Exception as e:
-            ok = False
-            log_signal.emit(2, f'托管待机退出游戏失败: {package}: {e}')
+    for _ in range(3):
+        foreground = _virtual_foreground_package(baas.serial, log_signal)
+        if foreground not in ('unknown', 'com.android.launcher') and foreground not in packages:
+            packages.append(foreground)
+
+        for package in packages:
+            try:
+                subprocess.run(
+                    ['adb', '-s', baas.serial, 'shell', 'am', 'force-stop', package],
+                    capture_output=True,
+                    timeout=8,
+                )
+                log_signal.emit(1, f'Exit game package for managed idle: {package}')
+            except Exception as e:
+                ok = False
+                log_signal.emit(2, f'托管待机退出游戏失败: {package}: {e}')
+
+        time.sleep(0.5)
+        foreground = _virtual_foreground_package(baas.serial, log_signal)
+        if foreground in ('unknown', 'com.android.launcher'):
+            break
     return ok
 
 
@@ -445,8 +482,8 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
             baas.task_finish_to_main_page = False
         return baas.flag_run
 
-    def enter_managed_idle():
-        _force_stop_game(baas, log_signal)
+    def enter_managed_idle(config_dirs):
+        _force_stop_game(baas, log_signal, _managed_config_packages(config_dirs, log_signal))
         _turn_physical_screen_off(baas.serial, log_signal)
 
     managed_configs = []
@@ -495,7 +532,7 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
             })
             if not idle_low_power:
                 log_signal.emit(1, '托管模式无到点任务，退出游戏并息屏待机')
-                enter_managed_idle()
+                enter_managed_idle(managed_configs)
                 idle_low_power = True
 
             wait_time = 30
