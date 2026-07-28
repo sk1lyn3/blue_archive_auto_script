@@ -275,17 +275,28 @@ def _find_due_config(config_dirs, start_idx):
 
 
 def _force_stop_game(baas, log_signal):
+    packages = [baas.package_name]
     try:
-        subprocess.run(
-            ['adb', '-s', baas.serial, 'shell', 'am', 'force-stop', baas.package_name],
-            capture_output=True,
-            timeout=8,
-        )
-        log_signal.emit(1, f'Exit game package for managed idle: {baas.package_name}')
-        return True
+        from core.device.virtual_scrcpy_client import VirtualScrcpyClient
+        foreground = VirtualScrcpyClient.get_instance(baas.serial).get_foreground_package()
+        if foreground not in ('unknown', 'com.android.launcher') and foreground not in packages:
+            packages.append(foreground)
     except Exception as e:
-        log_signal.emit(2, f'托管待机退出游戏失败: {e}')
-        return False
+        log_signal.emit(2, f'托管待机读取前台包失败: {e}')
+
+    ok = True
+    for package in packages:
+        try:
+            subprocess.run(
+                ['adb', '-s', baas.serial, 'shell', 'am', 'force-stop', package],
+                capture_output=True,
+                timeout=8,
+            )
+            log_signal.emit(1, f'Exit game package for managed idle: {package}')
+        except Exception as e:
+            ok = False
+            log_signal.emit(2, f'托管待机退出游戏失败: {package}: {e}')
+    return ok
 
 
 def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
