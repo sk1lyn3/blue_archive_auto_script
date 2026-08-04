@@ -28,14 +28,20 @@ def judge_use_invitation_ticket(self, cafe_no=1):
     nearest_time = get_nearest_hour(expected_hour)
     self.logger.info(f"Next usable time     :{invitation_ticket_next_usable_time}")
     self.logger.info(f"Nearest expected time:{nearest_time}")
-    if invitation_ticket_next_usable_time > nearest_time:
-        if (invitation_ticket_next_usable_time - nearest_time).seconds < 9 * 3600:
-            if flag:
-                self.logger.info(f"Use Invitation Ticket.")
-                return True
-            else:
-                self.logger.info(f"Use Invitation Ticket After Cool Down.")
-                self.next_time = invitation_ticket_cool_time
+    if flag:
+        self.logger.info(f"Use Invitation Ticket.")
+        return True
+
+    wait_until_expected = (nearest_time - current_time).total_seconds()
+    if wait_until_expected > 0:
+        self.logger.info(f"Use Invitation Ticket At Expected Time.")
+        self.next_time = wait_until_expected
+        return False
+
+    wait_after_expected = (invitation_ticket_next_usable_time - nearest_time).total_seconds()
+    if 0 < wait_after_expected < 9 * 3600:
+        self.logger.info(f"Use Invitation Ticket After Cool Down.")
+        self.next_time = invitation_ticket_cool_time
     return False
 
 
