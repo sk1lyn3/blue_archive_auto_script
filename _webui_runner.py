@@ -16,6 +16,8 @@ from datetime import datetime
 import core.virtual_scrcpy_compat
 core.virtual_scrcpy_compat.apply()
 
+from core.device.adb_path import adb_executable
+
 
 def _cleanup_virtual_scrcpy():
     try:
@@ -136,12 +138,12 @@ def _wake_unlock_and_turn_screen_off(baas, config_set, log_signal):
         serial = baas.serial
         if _physical_display_state(serial) == 'OFF':
             subprocess.run(
-                ['adb', '-s', serial, 'shell', 'input', 'keyevent', 'KEYCODE_WAKEUP'],
+                [adb_executable(), '-s', serial, 'shell', 'input', 'keyevent', 'KEYCODE_WAKEUP'],
                 capture_output=True,
                 timeout=5,
             )
             subprocess.run(
-                ['adb', '-s', serial, 'shell', 'wm', 'dismiss-keyguard'],
+                [adb_executable(), '-s', serial, 'shell', 'wm', 'dismiss-keyguard'],
                 capture_output=True,
                 timeout=5,
             )
@@ -160,7 +162,7 @@ def _wake_unlock_and_turn_screen_off(baas, config_set, log_signal):
 
 def _physical_display_state(serial):
     result = subprocess.run(
-        ['adb', '-s', serial, 'shell', 'dumpsys', 'display'],
+        [adb_executable(), '-s', serial, 'shell', 'dumpsys', 'display'],
         capture_output=True,
         text=True,
         timeout=5,
@@ -179,7 +181,7 @@ def _physical_display_state(serial):
 def _send_power_key(serial, log_signal):
     try:
         subprocess.run(
-            ['adb', '-s', serial, 'shell', 'input', 'keyevent', 'KEYCODE_POWER'],
+            [adb_executable(), '-s', serial, 'shell', 'input', 'keyevent', 'KEYCODE_POWER'],
             capture_output=True,
             timeout=5,
         )
@@ -195,7 +197,7 @@ def _turn_physical_screen_off(serial, log_signal):
         return True
     try:
         subprocess.run(
-            ['adb', '-s', serial, 'shell', 'input', 'keyevent', 'KEYCODE_POWER'],
+            [adb_executable(), '-s', serial, 'shell', 'input', 'keyevent', 'KEYCODE_POWER'],
             capture_output=True,
             timeout=5,
         )
@@ -320,7 +322,7 @@ def _force_stop_game(baas, log_signal, extra_packages=None):
         for package in packages:
             try:
                 subprocess.run(
-                    ['adb', '-s', baas.serial, 'shell', 'am', 'force-stop', package],
+                    [adb_executable(), '-s', baas.serial, 'shell', 'am', 'force-stop', package],
                     capture_output=True,
                     timeout=8,
                 )

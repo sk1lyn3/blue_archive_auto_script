@@ -25,6 +25,8 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from core.device.adb_path import adb_directory, adb_executable
+
 VIRTUAL_DISPLAY_IDLE = {'running': False, 'starting': False, 'displayId': None, 'configDir': None}
 MANAGED_MODE_IDLE = {
     'running': False,
@@ -92,9 +94,13 @@ def _reset_managed_mode() -> None:
     _log_q.put({'type': 'status', 'data': {'managedMode': _state['managedMode']}})
 
 def _runner_env(**extra: str) -> dict:
-    return {**os.environ, **extra,
-            'PYTHONUNBUFFERED': '1', 'NO_COLOR': '1', 'FORCE_COLOR': '0',
-            'QT_QPA_PLATFORM': 'offscreen'}
+    env = {**os.environ, **extra,
+           'PYTHONUNBUFFERED': '1', 'NO_COLOR': '1', 'FORCE_COLOR': '0',
+           'QT_QPA_PLATFORM': 'offscreen'}
+    adb_dir = adb_directory()
+    if adb_dir:
+        env['PATH'] = adb_dir + os.pathsep + env.get('PATH', '')
+    return env
 
 def _start_runner(env: dict, persistent: bool = False) -> subprocess.Popen:
     runner = os.path.join(os.path.dirname(__file__), '_webui_runner.py')
@@ -637,7 +643,7 @@ async def adb_connect(body: dict):
     if not serial:
         return {'ok': False, 'error': '未提供设备地址'}
     try:
-        r = subprocess.run(['adb', 'connect', serial], capture_output=True, text=True, timeout=10)
+        r = subprocess.run([adb_executable(), 'connect', serial], capture_output=True, text=True, timeout=10)
         output = (r.stdout + r.stderr).strip()
         ok = 'connected' in output.lower() or 'already' in output.lower()
         return {'ok': ok, 'output': output}

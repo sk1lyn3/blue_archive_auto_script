@@ -14,6 +14,7 @@ import time
 
 from adbutils import adb
 from core.device.scrcpy.core import Client
+from core.device.adb_path import adb_executable
 
 
 DISPLAY_SIZE = "1280x720/240"
@@ -106,7 +107,7 @@ class VirtualScrcpyClient:
             self.ensure_ready()
             display_id = self._display_id
             out = subprocess.check_output(
-                ["adb", "-s", self.serial, "shell", "dumpsys", "activity", "activities"],
+                [adb_executable(), "-s", self.serial, "shell", "dumpsys", "activity", "activities"],
                 text=True
             )
             in_display = False
@@ -264,11 +265,11 @@ class VirtualScrcpyClient:
         return True
 
     def _adb(self, cmd: str):
-        subprocess.run(["adb", "-s", self.serial, "shell", cmd], capture_output=True)
+        subprocess.run([adb_executable(), "-s", self.serial, "shell", cmd], capture_output=True)
 
     def _list_display_ids(self) -> set:
         out = subprocess.check_output(
-            ["adb", "-s", self.serial, "shell", "dumpsys", "display"], text=True
+            [adb_executable(), "-s", self.serial, "shell", "dumpsys", "display"], text=True
         )
         return set(int(x) for x in re.findall(r"mDisplayId=(\d+)", out))
 
