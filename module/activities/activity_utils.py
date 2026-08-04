@@ -1,4 +1,8 @@
+import time
+
+from core import position
 from core.image import compare_image
+from core.exception import FunctionCallTimeout
 from module.explore_tasks.task_utils import *
 
 
@@ -15,7 +19,51 @@ def get_stage_data(self):
     return stage_data
 
 
-def to_activity(self, region=None, skip_first_screenshot=False):
+def enter_task_map_for_generic_entry(self):
+    if self.latest_img_array is None:
+        self.update_screenshot_array()
+    if not color.match_rgb_feature(self, "main_page"):
+        return False
+    self.logger.info("Generic activity entry: enter task map before clicking left activity entry.")
+    self.click(1198, 580)
+    deadline = time.time() + 8
+    while self.flag_run and time.time() < deadline:
+        self.update_screenshot_array()
+        if color.match_rgb_feature(self, "loadingNotWhite") and color.match_rgb_feature(self, "loadingWhite"):
+            color.wait_loading(self)
+            return True
+        if color.match_rgb_feature(self, "event_normal") or color.match_rgb_feature(self, "event_hard"):
+            return True
+        time.sleep(self.screenshot_interval)
+    self.logger.warning("Generic activity entry: task map enter timed out, skip left activity entry.")
+    return False
+
+
+def feature_center(self, feature_name, fallback):
+    try:
+        area = position.get_area(self.identifier, feature_name)
+    except (KeyError, TypeError, ValueError):
+        area = None
+    if not area:
+        return fallback
+    return ((area[0] + area[2]) // 2, (area[1] + area[3]) // 2)
+
+
+def tab_click(self, feature_name, fallback):
+    if getattr(self, "activity_use_generic_entry", False):
+        return feature_center(self, feature_name, fallback)
+    return fallback
+
+
+def to_activity(self, region=None, skip_first_screenshot=False, optional=False):
+    generic_entry_clicked = False
+    if getattr(self, "activity_use_generic_entry", False):
+        if enter_task_map_for_generic_entry(self):
+            self.logger.info("Generic activity entry: click left activity entry from task map.")
+            self.click(84, 195)
+            generic_entry_clicked = True
+        skip_first_screenshot = False
+
     img_possibles = {
         "main_page_get-character": (640, 360),
         "activity_enter1": (1196, 195),
@@ -47,21 +95,31 @@ def to_activity(self, region=None, skip_first_screenshot=False):
         "activity_exchange-confirm": (673, 603),
     }
     img_ends = "activity_menu"
-    picture.co_detect(self, None, None, img_ends, img_possibles, skip_first_screenshot=skip_first_screenshot)
+    detect_kwargs = {
+        "skip_first_screenshot": skip_first_screenshot,
+    }
+    if generic_entry_clicked:
+        detect_kwargs.update({
+            "tentative_click": True,
+            "tentative_x": 84,
+            "tentative_y": 195,
+            "max_fail_cnt": 1,
+        })
+    picture.co_detect(self, None, None, img_ends, img_possibles, **detect_kwargs)
 
     img_possibles = {
         "story": {
-            "activity_story-not-chosen-0": (844, 89),
-            "activity_story-not-chosen-1": (936, 89),
+            "activity_story-not-chosen-0": tab_click(self, "activity_story-not-chosen-0", (844, 89)),
+            "activity_story-not-chosen-1": tab_click(self, "activity_story-not-chosen-1", (936, 89)),
         },
         "mission": {
-            "activity_mission-not-chosen-0": (1028, 91),
-            "activity_mission-not-chosen-1": (1200, 91),
-            "activity_mission-not-chosen-2": (936, 91),
+            "activity_mission-not-chosen-0": tab_click(self, "activity_mission-not-chosen-0", (1028, 91)),
+            "activity_mission-not-chosen-1": tab_click(self, "activity_mission-not-chosen-1", (1200, 91)),
+            "activity_mission-not-chosen-2": tab_click(self, "activity_mission-not-chosen-2", (936, 91)),
         },
         "challenge": {
-            "activity_challenge-not-chosen-0": (1200, 89),
-            "activity_challenge-not-chosen-1": (1200, 89)
+            "activity_challenge-not-chosen-0": tab_click(self, "activity_challenge-not-chosen-0", (1200, 89)),
+            "activity_challenge-not-chosen-1": tab_click(self, "activity_challenge-not-chosen-1", (1200, 89))
         },
     }
 
@@ -82,7 +140,22 @@ def to_activity(self, region=None, skip_first_screenshot=False):
     }
     img_possibles = img_possibles[region]
     img_ends = img_ends[region]
-    picture.co_detect(self, None, None, img_ends, img_possibles, skip_first_screenshot=True)
+    try:
+        picture.co_detect(
+            self,
+            None,
+            None,
+            img_ends,
+            img_possibles,
+            skip_first_screenshot=True,
+            time_out=20 if optional else 600,
+        )
+    except FunctionCallTimeout:
+        if optional:
+            self.logger.info(f"Optional activity tab [ {region} ] not found, skip.")
+            return False
+        raise
+    return True
 
 
 # sweep
@@ -254,7 +327,11 @@ def to_challenge_task_info(self, number):
 
 def explore_activity_challenge(self):
     self.to_main_page()
-    to_activity(self, "challenge", True)
+    if getattr(self, "activity_use_generic_entry", False):
+        if not to_activity(self, "challenge", True, optional=True):
+            return True
+    else:
+        to_activity(self, "challenge", True)
     tasks = [
         "challenge2_sss",
         "challenge2_task",

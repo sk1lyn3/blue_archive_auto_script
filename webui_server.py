@@ -406,8 +406,9 @@ async def run_task(body: dict):
     task = body.get('task', '').strip()
     if task not in _ALLOWED_TASKS:
         raise HTTPException(400, f'Unknown task: {task}')
+    options = body.get('options') or {}
     if _uses_virtual_scrcpy():
-        ok, err = _runner_cmd({'cmd': 'run_task', 'task': task, 'configDir': _config_dir})
+        ok, err = _runner_cmd({'cmd': 'run_task', 'task': task, 'configDir': _config_dir, 'options': options})
         if not ok:
             raise HTTPException(409, err or '请先启动虚拟屏幕')
         _set_status(running=True, currentTask=task)
@@ -416,7 +417,11 @@ async def run_task(body: dict):
         raise HTTPException(409, '主调度器正在运行，请先停止')
     if _proc_alive(_oneshot_proc):
         raise HTTPException(409, '已有单次任务在运行')
-    _oneshot_proc = _start_runner(_runner_env(BAAS_CONFIG_DIR=_config_dir, BAAS_TASK=task))
+    _oneshot_proc = _start_runner(_runner_env(
+        BAAS_CONFIG_DIR=_config_dir,
+        BAAS_TASK=task,
+        BAAS_TASK_OPTIONS=json.dumps(options, ensure_ascii=False),
+    ))
     threading.Thread(target=_read_stdout, args=(_oneshot_proc, 'oneshot'), daemon=True).start()
     _set_status(running=True, currentTask=task)
     return {'ok': True}

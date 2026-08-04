@@ -85,6 +85,20 @@ def _emit_managed_mode(**data) -> None:
     _emit_status({'managedMode': status})
 
 
+def _apply_task_options(baas, options):
+    previous = {
+        'activity_use_generic_entry': getattr(baas, 'activity_use_generic_entry', False),
+    }
+    options = options or {}
+    baas.activity_use_generic_entry = bool(options.get('activity_use_generic_entry', False))
+    return previous
+
+
+def _restore_task_options(baas, previous):
+    for key, value in previous.items():
+        setattr(baas, key, value)
+
+
 def _virtual_display_data(baas=None, config_set=None, running=True) -> dict:
     data = {'running': running, 'starting': False}
     try:
@@ -418,6 +432,13 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
             worker.start()
             return True
 
+    def run_with_task_options(task, options=None):
+        previous = _apply_task_options(baas, options)
+        try:
+            return baas.solve(task)
+        finally:
+            _restore_task_options(baas, previous)
+
     def run_one_scheduled_event(config_dir, event_hint):
         if not ensure_config(config_dir, allow_worker=True):
             return False
@@ -586,8 +607,9 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
                 _emit_managed_mode()
         elif cmd == 'run_task':
             task = msg.get('task', '').strip()
+            options = msg.get('options') or {}
             if task and ensure_config(msg.get('configDir')):
-                start_job(f'baas-task-{task}', f'单次任务: {task}', task, lambda: baas.solve(task))
+                start_job(f'baas-task-{task}', f'单次任务: {task}', task, lambda: run_with_task_options(task, options))
         elif cmd == 'stop_task':
             if worker_alive():
                 log_signal.emit(1, '停止当前任务请求已发送')
@@ -702,7 +724,15 @@ def main():
     one_shot = os.environ.get('BAAS_TASK', '').strip()
     if one_shot:
         log_signal.emit(1, f'--- 单次任务模式: {one_shot} ---')
-        baas.solve(one_shot)
+        try:
+            task_options = json.loads(os.environ.get('BAAS_TASK_OPTIONS', '{}'))
+        except json.JSONDecodeError:
+            task_options = {}
+        previous = _apply_task_options(baas, task_options)
+        try:
+            baas.solve(one_shot)
+        finally:
+            _restore_task_options(baas, previous)
         log_signal.emit(1, f'--- 任务完成: {one_shot} ---')
         return
 

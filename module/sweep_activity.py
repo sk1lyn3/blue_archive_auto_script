@@ -2,6 +2,13 @@ import importlib
 
 
 def implement(self):
+    if getattr(self, "activity_use_generic_entry", False):
+        if self.current_game_activity is not None:
+            self.logger.info("Current activity: " + self.current_game_activity)
+        else:
+            self.logger.warning("Current activity is not supported, use generic activity flow")
+        from module.activities.activity_utils import activity_sweep
+        return activity_sweep(self)
     if self.current_game_activity is None:
         self.logger.warning("Current activity is not supported")
         return True
