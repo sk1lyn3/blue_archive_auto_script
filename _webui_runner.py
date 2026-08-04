@@ -5,6 +5,7 @@ stdout 输出 JSON Lines，webui_server.py 解析后转发给 WebSocket 客户�
 import json
 import os
 import atexit
+import re
 import signal
 import subprocess
 import sys
@@ -150,7 +151,9 @@ def _wake_unlock_and_turn_screen_off(baas, config_set, log_signal):
         return False
     try:
         serial = baas.serial
-        if _physical_display_state(serial) == 'OFF':
+        display_state = _physical_display_state(serial)
+        log_signal.emit(1, f'Physical display state before wake: {display_state}')
+        if display_state == 'OFF':
             subprocess.run(
                 [adb_executable(), '-s', serial, 'shell', 'input', 'keyevent', 'KEYCODE_WAKEUP'],
                 capture_output=True,
@@ -181,15 +184,23 @@ def _physical_display_state(serial):
         text=True,
         timeout=5,
     )
+    screen_state = None
+    internal_state = None
     for line in result.stdout.splitlines():
-        if 'DisplayDeviceInfo{"内置屏幕"' not in line:
-            continue
-        if 'state OFF' in line:
-            return 'OFF'
-        if 'state ON' in line:
-            return 'ON'
-        return 'UNKNOWN'
-    return 'UNKNOWN'
+        state_match = re.search(r'\bDisplay State=(ON|OFF)\b', line)
+        if state_match:
+            return state_match.group(1)
+
+        screen_match = re.search(r'\bmScreenState=(ON|OFF)\b', line)
+        if screen_match:
+            screen_state = screen_match.group(1)
+
+        if 'DisplayDeviceInfo{' in line and 'type INTERNAL' in line:
+            internal_match = re.search(r'\bstate (ON|OFF)\b', line)
+            if internal_match:
+                internal_state = internal_match.group(1)
+
+    return screen_state or internal_state or 'UNKNOWN'
 
 
 def _send_power_key(serial, log_signal):
