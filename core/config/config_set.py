@@ -5,7 +5,7 @@ from core.config.generated_user_config import Config
 from core.config.generated_static_config import StaticConfig
 from gui.util.customized_ui import BoundComponent
 from gui.util.translator import baasTranslator as bt
-from dataclasses import asdict
+from dataclasses import asdict, fields
 
 
 class ConfigSet:
@@ -41,7 +41,12 @@ class ConfigSet:
 
     def _init_config(self):
         with open(os.path.join(self.config_dir, "config.json"), 'r', encoding='utf-8') as f:
-            self.config = Config(**json.load(f))
+            user_config = json.load(f)
+        from core.config.default_config import DEFAULT_CONFIG
+        default_config = json.loads(DEFAULT_CONFIG)
+        config_data = {**default_config, **user_config}
+        config_fields = {field.name for field in fields(Config)}
+        self.config = Config(**{key: value for key, value in config_data.items() if key in config_fields})
         self.server_mode = self.get_server_mode(self.config.server)
 
     @staticmethod

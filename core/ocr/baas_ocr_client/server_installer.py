@@ -23,7 +23,16 @@ import re
 if sys.platform not in ['win32', 'linux', 'darwin']:
     raise Exception("Ocr Unsupported platform " + sys.platform)
 
-OCR_SERVER_PREBUILD_URL = "https://gitee.com/pur1fy/baas_-cpp_prebuild.git"
+OCR_SERVER_PREBUILD_URLS = [
+    "https://github.com/pur1fying/BAAS_Cpp_prebuild.git",
+    "https://gitee.com/pur1fy/baas_-cpp_prebuild.git",
+    "https://v4.gh-proxy.org/https://github.com/pur1fying/BAAS_Cpp_prebuild.git",
+    "https://v6.gh-proxy.org/https://github.com/pur1fying/BAAS_Cpp_prebuild.git",
+    "https://cdn.gh-proxy.org/https://github.com/pur1fying/BAAS_Cpp_prebuild.git",
+    "https://gh-proxy.org/https://github.com/pur1fying/BAAS_Cpp_prebuild.git",
+    "https://gh.sevencdn.com/https://github.com/pur1fying/BAAS_Cpp_prebuild.git",
+    "https://githubfast.com/pur1fying/BAAS_Cpp_prebuild.git",
+]
 
 SERVER_INSTALLER_DIR_PATH = os.path.dirname(os.path.abspath(__file__))
 SERVER_BIN_DIR = os.path.join(SERVER_INSTALLER_DIR_PATH, 'bin')
@@ -86,9 +95,10 @@ def check_git(logger):
             shutil.rmtree(SERVER_BIN_DIR + '/.git')
             clone_repo(logger)
             return
-        # Get remote SHA
-        remote_refs = porcelain.ls_remote(OCR_SERVER_PREBUILD_URL)
-        remote_sha = remote_refs.get(b'refs/heads/' + branch.encode('ascii')).decode('ascii')
+        remote_url, remote_sha = get_remote_sha(logger)
+        if remote_url is None:
+            logger.warning("Ocr Server update check skipped; all remote sources are unavailable.")
+            return
 
         logger.info(f"remote_sha: {remote_sha}")
         logger.info(f"local_sha : {local_sha}")
@@ -100,15 +110,15 @@ def check_git(logger):
             # Reset the local repository to the state of the remote repository
             porcelain.reset(repo, mode='hard')
             # Pull the latest changes from the remote repository
-            for i in range(1, 4):
+            for i, url in enumerate(OCR_SERVER_PREBUILD_URLS, start=1):
                 try:
-                    porcelain.pull(repo, OCR_SERVER_PREBUILD_URL, branch, protocol_version=0)
+                    porcelain.pull(repo, url, branch, protocol_version=0)
                     break
                 except Exception as e:
-                    if i == 3:
+                    if i == len(OCR_SERVER_PREBUILD_URLS):
                         raise OcrInternalError("Failed to update the BAAS_ocr_server. Please check your network")
-                    logger.error(f"Failed to update BAAS_ocr_server, retrying... {i}")
-                    logger.error(e)
+                    logger.warning(f"Failed to update BAAS_ocr_server from {url}, trying next source... {i}")
+                    logger.warning(e)
             updated_local_sha = repo.head().decode('ascii')
             if updated_local_sha == remote_sha:
                 logger.info("Ocr Server Update success.")
@@ -118,13 +128,28 @@ def check_git(logger):
 
 def clone_repo(logger):
     logger.info("Installing Ocr Server, please hang on...")
-    for i in range(1, 4):
+    for i, url in enumerate(OCR_SERVER_PREBUILD_URLS, start=1):
         try:
-            porcelain.clone(OCR_SERVER_PREBUILD_URL, SERVER_BIN_DIR, branch=branch)
+            porcelain.clone(url, SERVER_BIN_DIR, branch=branch)
             break
         except Exception as e:
-            if i == 3:
+            if i == len(OCR_SERVER_PREBUILD_URLS):
                 raise OcrInternalError("Failed to install the BAAS_ocr_server. Please check your network")
-            logger.error(f"Failed to install BAAS_ocr_server, retrying... {i}")
-            logger.error(e.__str__())
+            logger.warning(f"Failed to install BAAS_ocr_server from {url}, trying next source... {i}")
+            logger.warning(e.__str__())
     logger.info("Ocr Server Install success.")
+
+
+def get_remote_sha(logger):
+    ref_name = b'refs/heads/' + branch.encode('ascii')
+    for url in OCR_SERVER_PREBUILD_URLS:
+        try:
+            remote_refs = porcelain.ls_remote(url)
+            remote_sha = remote_refs.get(ref_name)
+            if remote_sha is None:
+                logger.warning(f"Ocr Server source missing branch {branch}: {url}")
+                continue
+            return url, remote_sha.decode('ascii')
+        except Exception as e:
+            logger.warning(f"Failed to check BAAS_ocr_server source {url}: {e}")
+    return None, None
