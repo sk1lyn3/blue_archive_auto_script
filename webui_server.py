@@ -648,10 +648,15 @@ async def adb_connect(body: dict):
     if not serial:
         return {'ok': False, 'error': '未提供设备地址'}
     try:
-        r = subprocess.run([adb_executable(), 'connect', serial], capture_output=True, text=True, timeout=10)
+        if ':' in serial:
+            r = subprocess.run([adb_executable(), 'connect', serial], capture_output=True, text=True, timeout=10)
+            output = (r.stdout + r.stderr).strip()
+            ok = 'connected' in output.lower() or 'already' in output.lower()
+            return {'ok': ok, 'output': output}
+        r = subprocess.run([adb_executable(), '-s', serial, 'get-state'], capture_output=True, text=True, timeout=10)
         output = (r.stdout + r.stderr).strip()
-        ok = 'connected' in output.lower() or 'already' in output.lower()
-        return {'ok': ok, 'output': output}
+        ok = r.returncode == 0 and output.strip() == 'device'
+        return {'ok': ok, 'output': output or ('设备在线' if ok else '设备不可用')}
     except FileNotFoundError:
         return {'ok': False, 'error': 'adb 未安装，请先安装 Android Platform Tools'}
     except subprocess.TimeoutExpired:
