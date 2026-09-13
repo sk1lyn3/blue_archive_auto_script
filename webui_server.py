@@ -97,6 +97,12 @@ def _runner_env(**extra: str) -> dict:
     env = {**os.environ, **extra,
            'PYTHONUNBUFFERED': '1', 'NO_COLOR': '1', 'FORCE_COLOR': '0',
            'QT_QPA_PLATFORM': 'offscreen'}
+    adb_socket = env.get('ADB_SERVER_SOCKET', '')
+    if adb_socket.startswith('tcp:') and not env.get('ANDROID_ADB_SERVER_HOST'):
+        parts = adb_socket.split(':')
+        if len(parts) == 3 and parts[2].isdigit():
+            env['ANDROID_ADB_SERVER_HOST'] = parts[1]
+            env.setdefault('ANDROID_ADB_SERVER_PORT', parts[2])
     adb_dir = adb_directory()
     if adb_dir:
         env['PATH'] = adb_dir + os.pathsep + env.get('PATH', '')
