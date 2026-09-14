@@ -294,6 +294,9 @@ def to_mission_task_info(self, target_index, total_mission):
 def explore_activity_story(self):
     self.stage_data = get_stage_data(self)
     total_story = self.stage_data["total_story"]
+    if getattr(self, "activity_use_generic_entry", False):
+        total_story = getattr(self, "activity_generic_total_story", None) or 12
+        self.logger.info(f"Generic activity story count: {total_story}")
     self.to_main_page()
     to_activity(self, "story", True)
     last_target_task = 1
