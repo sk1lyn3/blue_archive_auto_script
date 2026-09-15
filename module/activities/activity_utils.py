@@ -1,7 +1,7 @@
 import time
 
 from core import position
-from core.image import compare_image
+from core.image import compare_image, search_in_area, swipe_search_target_str
 from core.exception import FunctionCallTimeout
 from module.explore_tasks.task_utils import *
 
@@ -55,6 +55,46 @@ def tab_click(self, feature_name, fallback):
     return fallback
 
 
+def generic_activity_tab_selected(self, region, optional=False):
+    tab_area = (650, 70, 1225, 150)
+    selected_features = {
+        "story": ["activity_story-chosen-0", "activity_story-chosen-1"],
+        "mission": ["activity_mission-chosen-0", "activity_mission-chosen-1", "activity_mission-chosen-2"],
+        "challenge": ["activity_challenge-chosen-0", "activity_challenge-chosen-1"],
+    }
+    not_chosen_features = {
+        "story": ["activity_story-not-chosen-0", "activity_story-not-chosen-1"],
+        "mission": ["activity_mission-not-chosen-0", "activity_mission-not-chosen-1", "activity_mission-not-chosen-2"],
+        "challenge": ["activity_challenge-not-chosen-0", "activity_challenge-not-chosen-1"],
+    }
+
+    deadline = time.time() + (20 if optional else 60)
+    while self.flag_run and time.time() < deadline:
+        for feature_name in selected_features[region]:
+            if search_in_area(self, feature_name, tab_area, threshold=0.8):
+                self.logger.info(f"Generic activity tab [ {region} ] selected.")
+                return True
+        for feature_name in not_chosen_features[region]:
+            upper_left = search_in_area(self, feature_name, tab_area, threshold=0.8)
+            if not upper_left:
+                continue
+            template = position.image_dic[self.identifier][feature_name]
+            x = upper_left[0] + template.shape[1] // 2
+            y = upper_left[1] + template.shape[0] // 2
+            self.logger.info(f"Generic activity tab [ {region} ] -> Click @ ({x},{y})")
+            self.click(x, y)
+            time.sleep(self.screenshot_interval)
+            self.update_screenshot_array()
+            break
+        else:
+            if optional:
+                self.logger.info(f"Optional generic activity tab [ {region} ] not found, skip.")
+                return False
+            break
+
+    return False
+
+
 def to_activity(self, region=None, skip_first_screenshot=False, optional=False):
     generic_entry_clicked = False
     if getattr(self, "activity_use_generic_entry", False):
@@ -106,6 +146,9 @@ def to_activity(self, region=None, skip_first_screenshot=False, optional=False):
             "max_fail_cnt": 1,
         })
     picture.co_detect(self, None, None, img_ends, img_possibles, **detect_kwargs)
+
+    if getattr(self, "activity_use_generic_entry", False) and generic_activity_tab_selected(self, region, optional):
+        return True
 
     img_possibles = {
         "story": {
@@ -253,7 +296,18 @@ def explore_activity_mission(self):
         if last_target_task == total_mission and res == "sss":
             self.logger.info("All MISSION SSS")
             return True
-        start_mission(self, self.stage_data["mission"][last_target_task - 1])  # self.stage_data["mission"][last_target_task-1] str of attribute
+        if getattr(self, "activity_use_generic_entry", False):
+            target_task = getattr(self, "activity_generic_last_mission_index", last_target_task)
+        else:
+            target_task = last_target_task
+        start_mission(self, self.stage_data["mission"][target_task - 1])
+        if getattr(self, "activity_use_generic_entry", False):
+            if target_task >= total_mission:
+                self.logger.info("Reached final generic mission target.")
+                return True
+            last_target_task = target_task + 1
+            to_activity(self, "mission", True)
+            continue
         tar = "story"
         if self.stage_data["total_story"] == 0:
             tar = "challenge"
@@ -285,6 +339,33 @@ def to_mission_task_info(self, target_index, total_mission):
         ocr_candidates="0123456789l",
         first_retry_dir=1
     )
+    if p is None:
+        if not getattr(self, "activity_use_generic_entry", False):
+            raise FunctionCallTimeout(f"Activity mission target [ {target_index} ] not found.")
+        p = search_in_area(self, "activity_mission-enter-task-button", (1060, 143, 1195, 686), 0.8)
+        if not p:
+            raise FunctionCallTimeout(f"Generic activity mission target [ {target_index} ] not found.")
+        self.logger.info(f"Generic activity mission target [ {target_index} ] not found, use visible task at {p}.")
+        ocr_region = (
+            p[0] + ocr_region_offsets[self.identifier][0],
+            p[1] + ocr_region_offsets[self.identifier][1],
+            p[0] + ocr_region_offsets[self.identifier][0] + ocr_region_offsets[self.identifier][2],
+            p[1] + ocr_region_offsets[self.identifier][1] + ocr_region_offsets[self.identifier][3]
+        )
+        ocr_str = self.ocr.get_region_res(
+            baas=self,
+            region=ocr_region,
+            language='en-us',
+            candidates="0123456789l",
+            filter_score=0.2
+        )
+        ocr_str = ocr_str_replace_func(ocr_str)
+        if ocr_str in possible_strs:
+            self.activity_generic_last_mission_index = possible_strs.index(ocr_str) + 1
+        else:
+            self.activity_generic_last_mission_index = target_index
+    elif getattr(self, "activity_use_generic_entry", False):
+        self.activity_generic_last_mission_index = target_index
     y = p[1] + 10  # move down a little bit in case click to challenge page
     possibles = {'activity_menu': (1124, y)}
     ends = "activity_task-info"
