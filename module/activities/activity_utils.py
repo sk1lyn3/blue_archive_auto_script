@@ -302,11 +302,11 @@ def explore_activity_mission(self):
             target_task = last_target_task
         start_mission(self, self.stage_data["mission"][target_task - 1])
         if getattr(self, "activity_use_generic_entry", False):
+            to_activity(self, "mission", True)
             if target_task >= total_mission:
                 self.logger.info("Reached final generic mission target.")
                 return True
             last_target_task = target_task + 1
-            to_activity(self, "mission", True)
             continue
         tar = "story"
         if self.stage_data["total_story"] == 0:
