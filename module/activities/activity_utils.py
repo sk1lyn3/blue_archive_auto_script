@@ -98,26 +98,31 @@ def generic_activity_tab_selected(self, region, optional=False):
 def generic_activity_reset_scroll_position(self, region):
     if region is None:
         return
-    bounce_candidates = {
-        "story": ["mission", "challenge"],
-        "mission": ["challenge", "story"],
-        "challenge": ["mission", "story"],
-    }
-    for candidate in bounce_candidates.get(region, []):
-        if not generic_activity_tab_selected(self, candidate, optional=True):
-            continue
-        if generic_activity_tab_selected(self, region):
-            self.logger.info(f"Generic activity tab [ {region} ] scroll reset by switching tabs.")
-            return
     self.logger.info(f"Generic activity tab [ {region} ] scroll reset by pull down.")
     self.swipe(919, 155, 943, 720, duration=0.05, post_sleep_time=1)
     self.update_screenshot_array()
 
 
+def generic_activity_start_at_menu(self):
+    return (
+        getattr(self, "activity_use_generic_entry", False)
+        and getattr(self, "activity_generic_start_at_menu", False)
+    )
+
+
+def prepare_activity_menu_entry(self):
+    if generic_activity_start_at_menu(self):
+        self.logger.info("Generic activity entry: use current activity menu.")
+        return
+    self.to_main_page()
+
+
 def to_activity(self, region=None, skip_first_screenshot=False, optional=False, reset_scroll=False):
     generic_entry_clicked = False
     if getattr(self, "activity_use_generic_entry", False):
-        if enter_task_map_for_generic_entry(self):
+        if generic_activity_start_at_menu(self):
+            self.logger.info("Generic activity entry: start from current activity menu.")
+        elif enter_task_map_for_generic_entry(self):
             self.logger.info("Generic activity entry: click left activity entry from task map.")
             self.click(84, 195)
             generic_entry_clicked = True
@@ -162,7 +167,7 @@ def to_activity(self, region=None, skip_first_screenshot=False, optional=False, 
             "tentative_click": True,
             "tentative_x": 84,
             "tentative_y": 195,
-            "max_fail_cnt": 1,
+            "max_fail_cnt": max(3, int(1.2 / self.screenshot_interval)),
         })
     picture.co_detect(self, None, None, img_ends, img_possibles, **detect_kwargs)
 
@@ -304,7 +309,7 @@ def start_sweep(self, skip_first_screenshot=False):
 def explore_activity_mission(self):
     self.stage_data = get_stage_data(self)
     total_mission = len(self.stage_data["mission"])
-    self.to_main_page()
+    prepare_activity_menu_entry(self)
     to_activity(self, "mission", True)
     last_target_task = 1
     while self.flag_run:
@@ -401,7 +406,7 @@ def explore_activity_story(self):
     if getattr(self, "activity_use_generic_entry", False):
         total_story = getattr(self, "activity_generic_total_story", None) or 12
         self.logger.info(f"Generic activity story count: {total_story}")
-    self.to_main_page()
+    prepare_activity_menu_entry(self)
     to_activity(self, "story", True)
     last_target_task = 1
     while self.flag_run:
@@ -433,7 +438,7 @@ def to_challenge_task_info(self, number):
 
 
 def explore_activity_challenge(self):
-    self.to_main_page()
+    prepare_activity_menu_entry(self)
     if getattr(self, "activity_use_generic_entry", False):
         if not to_activity(self, "challenge", True, optional=True):
             return True

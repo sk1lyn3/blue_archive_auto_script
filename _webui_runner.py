@@ -90,9 +90,11 @@ def _apply_task_options(baas, options):
     previous = {
         'activity_use_generic_entry': getattr(baas, 'activity_use_generic_entry', False),
         'activity_generic_total_story': getattr(baas, 'activity_generic_total_story', None),
+        'activity_generic_start_at_menu': getattr(baas, 'activity_generic_start_at_menu', False),
     }
     options = options or {}
     baas.activity_use_generic_entry = bool(options.get('activity_use_generic_entry', False))
+    baas.activity_generic_start_at_menu = bool(options.get('activity_generic_start_at_menu', False))
     total_story = options.get('activity_generic_total_story')
     try:
         baas.activity_generic_total_story = max(1, min(99, int(total_story)))
