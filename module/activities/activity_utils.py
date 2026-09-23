@@ -95,7 +95,26 @@ def generic_activity_tab_selected(self, region, optional=False):
     return False
 
 
-def to_activity(self, region=None, skip_first_screenshot=False, optional=False):
+def generic_activity_reset_scroll_position(self, region):
+    if region is None:
+        return
+    bounce_candidates = {
+        "story": ["mission", "challenge"],
+        "mission": ["challenge", "story"],
+        "challenge": ["mission", "story"],
+    }
+    for candidate in bounce_candidates.get(region, []):
+        if not generic_activity_tab_selected(self, candidate, optional=True):
+            continue
+        if generic_activity_tab_selected(self, region):
+            self.logger.info(f"Generic activity tab [ {region} ] scroll reset by switching tabs.")
+            return
+    self.logger.info(f"Generic activity tab [ {region} ] scroll reset by pull down.")
+    self.swipe(919, 155, 943, 720, duration=0.05, post_sleep_time=1)
+    self.update_screenshot_array()
+
+
+def to_activity(self, region=None, skip_first_screenshot=False, optional=False, reset_scroll=False):
     generic_entry_clicked = False
     if getattr(self, "activity_use_generic_entry", False):
         if enter_task_map_for_generic_entry(self):
@@ -148,6 +167,8 @@ def to_activity(self, region=None, skip_first_screenshot=False, optional=False):
     picture.co_detect(self, None, None, img_ends, img_possibles, **detect_kwargs)
 
     if getattr(self, "activity_use_generic_entry", False) and generic_activity_tab_selected(self, region, optional):
+        if reset_scroll:
+            generic_activity_reset_scroll_position(self, region)
         return True
 
     img_possibles = {
@@ -198,6 +219,8 @@ def to_activity(self, region=None, skip_first_screenshot=False, optional=False):
             self.logger.info(f"Optional activity tab [ {region} ] not found, skip.")
             return False
         raise
+    if getattr(self, "activity_use_generic_entry", False) and reset_scroll:
+        generic_activity_reset_scroll_position(self, region)
     return True
 
 
@@ -302,7 +325,7 @@ def explore_activity_mission(self):
             target_task = last_target_task
         start_mission(self, self.stage_data["mission"][target_task - 1])
         if getattr(self, "activity_use_generic_entry", False):
-            to_activity(self, "mission", True)
+            to_activity(self, "mission", True, reset_scroll=True)
             if target_task >= total_mission:
                 self.logger.info("Reached final generic mission target.")
                 return True
@@ -395,7 +418,7 @@ def explore_activity_story(self):
             return True
         start_story(self)
         to_activity(self, "mission", True)
-        to_activity(self, "story", True)
+        to_activity(self, "story", True, reset_scroll=getattr(self, "activity_use_generic_entry", False))
 
 
 def to_challenge_task_info(self, number):
@@ -454,7 +477,7 @@ def explore_activity_challenge(self):
         if self.config.manual_boss:
             self.click(1235, 41)
         to_activity(self, "mission", True)
-        to_activity(self, "challenge", True)
+        to_activity(self, "challenge", True, reset_scroll=getattr(self, "activity_use_generic_entry", False))
 
 
 def start_mission(self, attribute_str: str):
