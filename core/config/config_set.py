@@ -48,6 +48,55 @@ class ConfigSet:
         config_fields = {field.name for field in fields(Config)}
         self.config = Config(**{key: value for key, value in config_data.items() if key in config_fields})
         self.server_mode = self.get_server_mode(self.config.server)
+        self._migrate_config()
+
+    def _migrate_config(self):
+        changed = False
+        changed |= self._migrate_shop_list("CommonShopList", self.static_config.common_shop_price_list)
+        changed |= self._migrate_shop_list(
+            "TacticalChallengeShopList",
+            self.static_config.tactical_challenge_shop_price_list
+        )
+        if changed:
+            self.save()
+
+    def _migrate_shop_list(self, config_key, price_lists):
+        target_price = price_lists.get(self.server_mode)
+        if target_price is None:
+            return False
+
+        buy_list = getattr(self.config, config_key)
+        if len(buy_list) == len(target_price):
+            return False
+
+        source_price = self._find_shop_price_template_by_length(price_lists, len(buy_list))
+        if source_price is None:
+            setattr(self.config, config_key, [0] * len(target_price))
+            return True
+
+        values_by_name = {}
+        for idx, item in enumerate(source_price):
+            values_by_name.setdefault(item[0], []).append(buy_list[idx])
+
+        migrated = []
+        for item in target_price:
+            values = values_by_name.get(item[0], [])
+            migrated.append(values.pop(0) if values else 0)
+
+        setattr(self.config, config_key, migrated)
+        return True
+
+    @staticmethod
+    def _find_shop_price_template_by_length(price_lists, length):
+        candidates = [price for price in price_lists.values() if len(price) == length]
+        if not candidates:
+            return None
+
+        first_names = [item[0] for item in candidates[0]]
+        for price in candidates[1:]:
+            if [item[0] for item in price] != first_names:
+                return None
+        return candidates[0]
 
     @staticmethod
     def get_server_mode(server):
