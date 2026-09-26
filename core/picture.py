@@ -199,6 +199,7 @@ def deal_with_pop_ups(self, pop_ups_rgb_reactions: dict = None, pop_ups_img_reac
     common_task_img_reactions = {
         'CN': {
             'main_page_net-work-unstable': (767, 501),
+            'main_page_login-network-error-message': (640, 438),
         },
         'JP': {
 
