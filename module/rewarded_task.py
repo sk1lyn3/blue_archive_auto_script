@@ -15,11 +15,12 @@ def implement(self):
         to_choose_bounty(self)
         purchase_bounty_ticket(self, buy_ticket_times)
 
-    bounty_name = ["OVERPASS", "DESSERT RAILWAY", "CLASSROOM"]
-    self.rewarded_task_status = [False, False, False]
+    bounty_name = get_bounty_names(self)
+    max_bounty_count = min(len(count), len(bounty_name), len(get_bounty_location_y(self)) - 1)
+    self.rewarded_task_status = [False] * max_bounty_count
     just_do_task = False
 
-    for i in range(0, 3):
+    for i in range(0, max_bounty_count):
         if just_do_task:
             to_choose_bounty(self)
         if count[i] == "max" or count[i] > 0:
@@ -151,8 +152,26 @@ BOUNTY_BUTTON_Y = {
     "JP": 378
 }
 
+BOUNTY_LOCATION_Y = {
+    "CN": [0, 206, 309, 418],
+    "Global": [0, 206, 309, 418],
+    "JP": [0, 206, 309, 418, 522, 626]
+}
+
+
+def get_bounty_names(self):
+    default_names = ["OVERPASS", "DESSERT RAILWAY", "CLASSROOM"]
+    if self.server == "JP":
+        return default_names + ["BOUNTY 4", "BOUNTY 5"]
+    return default_names
+
+
+def get_bounty_location_y(self):
+    return BOUNTY_LOCATION_Y.get(self.server, BOUNTY_LOCATION_Y["Global"])
+
+
 def to_bounty(self, num, skip_first_screenshot=False):
-    bounty_location_y = [0, 206, 309, 418]
+    bounty_location_y = get_bounty_location_y(self)
     img_ends = "rewarded_task_level-list"
     img_possibles = {
         "main_page_bus": (731, BOUNTY_BUTTON_Y[self.server]),
@@ -203,4 +222,3 @@ def purchase_bounty_ticket(self, times):
         "rewarded_task_purchase-bounty-ticket-notice": (766, 507),
     }
     picture.co_detect(self, None, None, img_ends, img_possibles, skip_first_screenshot=False)
-
