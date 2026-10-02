@@ -3,5 +3,8 @@ __pycache__/
 venv/
 config/
 *.json.bak
-default_DeviceOption.json
+*_DeviceOption.json
+baas_last_frame.png
+*_shot.png
+core/ocr/baas_ocr_client/bin/
 core/ocr/baas_ocr_client/bin/output/
