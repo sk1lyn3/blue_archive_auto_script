@@ -15,6 +15,8 @@ def apply():
     _patch_connection()
     _patch_color()
     _patch_baas_thread()
+    from core.device.swipe_compat import apply as apply_swipe_compat
+    apply_swipe_compat()
 
 
 # ── Device factories ──────────────────────────────────────────────────────────
@@ -93,48 +95,6 @@ def _patch_color():
 
 def _patch_baas_thread():
     from core.Baas_thread import Baas_thread
-    from core.exception import RequestHumanTakeOver
-
-    # swipe: enforce minimum duration so virtual display registers the touch
-    _orig_swipe = Baas_thread.swipe
-
-    def _swipe(self, fx, fy, tx, ty, duration=None, post_sleep_time=0):
-        if getattr(getattr(self, 'config', None), 'screenshot_method', '') == 'virtual_scrcpy':
-            duration = max(0.3, duration or 0.3)
-        return _orig_swipe(self, fx, fy, tx, ty, duration, post_sleep_time)
-
-    Baas_thread.swipe = _swipe
-
-    # u2_swipe: u2 isn't available on the virtual display — redirect to scrcpy control
-    _orig_u2_swipe = Baas_thread.u2_swipe
-
-    def _u2_swipe(self, fx, fy, tx, ty, duration=None, post_sleep_time=0):
-        if getattr(getattr(self, 'config', None), 'screenshot_method', '') == 'virtual_scrcpy':
-            duration = max(1.5, duration or 0.3)
-            self.control.swipe(fx * self.ratio, fy * self.ratio,
-                               tx * self.ratio, ty * self.ratio, duration)
-            if post_sleep_time > 0:
-                time.sleep(post_sleep_time)
-            return
-        return _orig_u2_swipe(self, fx, fy, tx, ty, duration, post_sleep_time)
-
-    Baas_thread.u2_swipe = _u2_swipe
-
-    # pinch: new method — not in upstream Baas_thread
-    def _pinch(self, cx, cy, spread_start, spread_end, steps=30):
-        if not self.flag_run:
-            raise RequestHumanTakeOver
-        if getattr(getattr(self, 'config', None), 'screenshot_method', '') == 'virtual_scrcpy':
-            from core.device.virtual_scrcpy_client import VirtualScrcpyClient
-            VirtualScrcpyClient.get_instance(self.serial).pinch(
-                int(cx * self.ratio), int(cy * self.ratio),
-                int(spread_start * self.ratio), int(spread_end * self.ratio),
-                steps
-            )
-        elif self.is_android_device:
-            self.u2().pinch_in(percent=int(spread_end / spread_start * 100), steps=steps)
-
-    Baas_thread.pinch = _pinch
 
     # _get_android_device_resolution: wrap u2 with VirtualU2Proxy, skip check_atx
     _orig_get_res = Baas_thread._get_android_device_resolution

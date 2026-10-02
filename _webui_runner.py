@@ -18,12 +18,16 @@ import core.virtual_scrcpy_compat
 core.virtual_scrcpy_compat.apply()
 
 from core.device.adb_path import adb_executable
+from core.device.display_backend import DISPLAY_METHODS, display_backend, release_display_backends
+
+
+def _display_client(baas):
+    return display_backend(baas.config.screenshot_method).get_instance(baas.serial)
 
 
 def _cleanup_virtual_scrcpy():
     try:
-        from core.device.virtual_scrcpy_client import VirtualScrcpyClient
-        VirtualScrcpyClient.release_all()
+        release_display_backends()
     except Exception:
         pass
 
@@ -113,9 +117,8 @@ def _virtual_display_data(baas=None, config_set=None, running=True) -> dict:
     try:
         if config_set is not None:
             data['configDir'] = os.path.basename(config_set.config_dir)
-        if running and baas is not None and getattr(baas.config, 'screenshot_method', '') == 'virtual_scrcpy':
-            from core.device.virtual_scrcpy_client import VirtualScrcpyClient
-            cli = VirtualScrcpyClient.get_instance(baas.serial)
+        if running and baas is not None and getattr(baas.config, 'screenshot_method', '') in DISPLAY_METHODS:
+            cli = _display_client(baas)
             data['displayId'] = cli.display_id
     except Exception:
         pass
@@ -143,19 +146,17 @@ def _start_resource_reporter(config_set):
 
 
 def _launch_game_on_virtual_display(baas, log_signal):
-    if getattr(baas.config, 'screenshot_method', '') != 'virtual_scrcpy':
+    if getattr(baas.config, 'screenshot_method', '') not in DISPLAY_METHODS:
         return
-    from core.device.virtual_scrcpy_client import VirtualScrcpyClient
-
     activity_name = baas.activity_name
-    cli = VirtualScrcpyClient.get_instance(baas.serial)
+    cli = _display_client(baas)
     log_signal.emit(1, 'Launch game on virtual display')
     cli.launch_app(baas.package_name, activity_name)
 
 
 def _wake_unlock_and_turn_screen_off(baas, config_set, log_signal):
-    if getattr(baas.config, 'screenshot_method', '') != 'virtual_scrcpy':
-        log_signal.emit(3, '当前配置未使用 virtual_scrcpy')
+    if getattr(baas.config, 'screenshot_method', '') not in DISPLAY_METHODS:
+        log_signal.emit(3, 'The current configuration does not use a virtual display backend')
         return False
     try:
         serial = baas.serial
@@ -174,14 +175,13 @@ def _wake_unlock_and_turn_screen_off(baas, config_set, log_signal):
             )
             time.sleep(0.2)
 
-        from core.device.virtual_scrcpy_client import VirtualScrcpyClient
-        cli = VirtualScrcpyClient.get_instance(serial)
+        cli = _display_client(baas)
         cli.turn_screen_off()
         log_signal.emit(1, 'Wake/unlock device and turn physical screen off')
         _emit_virtual_display(_virtual_display_data(baas, config_set, running=True))
         return True
     except Exception as e:
-        log_signal.emit(3, f'唤醒解锁并关屏失败: {e}')
+        log_signal.emit(3, f'Failed to wake/unlock the device and turn off the physical screen: {e}')
         return False
 
 
@@ -220,7 +220,7 @@ def _send_power_key(serial, log_signal):
         )
         log_signal.emit(1, 'Send power key before virtual display shutdown')
     except Exception as e:
-        log_signal.emit(2, f'发送电源键失败: {e}')
+        log_signal.emit(2, f'Failed to send the power key: {e}')
 
 
 def _turn_physical_screen_off(serial, log_signal):
@@ -237,7 +237,7 @@ def _turn_physical_screen_off(serial, log_signal):
         log_signal.emit(1, 'Turn physical screen off for managed idle')
         return True
     except Exception as e:
-        log_signal.emit(2, f'托管待机息屏失败: {e}')
+        log_signal.emit(2, f'Failed to turn off the physical screen for managed idle: {e}')
         return False
 
 
@@ -318,7 +318,7 @@ def _config_package(config_dir, log_signal):
             server = json.load(f).get('server')
         return static_config.get('package_name', {}).get(server)
     except Exception as e:
-        log_signal.emit(2, f'读取托管配置包名失败: {config_dir}: {e}')
+        log_signal.emit(2, f'Failed to read the managed configuration package: {config_dir}: {e}')
         return None
 
 
@@ -331,12 +331,11 @@ def _managed_config_packages(config_dirs, log_signal):
     return packages
 
 
-def _virtual_foreground_package(serial, log_signal):
+def _virtual_foreground_package(baas, log_signal):
     try:
-        from core.device.virtual_scrcpy_client import VirtualScrcpyClient
-        return VirtualScrcpyClient.get_instance(serial).get_foreground_package()
+        return _display_client(baas).get_foreground_package()
     except Exception as e:
-        log_signal.emit(2, f'托管待机读取前台包失败: {e}')
+        log_signal.emit(2, f'Failed to read the foreground package for managed idle: {e}')
         return 'unknown'
 
 
@@ -348,7 +347,7 @@ def _force_stop_game(baas, log_signal, extra_packages=None):
 
     ok = True
     for _ in range(3):
-        foreground = _virtual_foreground_package(baas.serial, log_signal)
+        foreground = _virtual_foreground_package(baas, log_signal)
         if foreground not in ('unknown', 'com.android.launcher') and foreground not in packages:
             packages.append(foreground)
 
@@ -362,13 +361,27 @@ def _force_stop_game(baas, log_signal, extra_packages=None):
                 log_signal.emit(1, f'Exit game package for managed idle: {package}')
             except Exception as e:
                 ok = False
-                log_signal.emit(2, f'托管待机退出游戏失败: {package}: {e}')
+                log_signal.emit(2, f'Failed to exit the game for managed idle: {package}: {e}')
 
         time.sleep(0.5)
-        foreground = _virtual_foreground_package(baas.serial, log_signal)
+        foreground = _virtual_foreground_package(baas, log_signal)
         if foreground in ('unknown', 'com.android.launcher'):
             break
     return ok
+
+
+def _stop_game_on_config_switch(previous, target, log_signal):
+    previous_session = (previous.serial, previous.package_name, previous.config.screenshot_method)
+    target_session = (target.serial, target.package_name, target.config.screenshot_method)
+    if previous_session == target_session:
+        return
+    subprocess.run(
+        [adb_executable(), '-s', previous.serial, 'shell', 'am', 'force-stop', previous.package_name],
+        capture_output=True,
+        timeout=8,
+        check=True,
+    )
+    log_signal.emit(1, f'Exit previous game before configuration switch: {previous.package_name}')
 
 
 def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
@@ -383,34 +396,34 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
         if not config_dir:
             config_dir = os.path.basename(config_set.config_dir)
         if worker_alive() and not allow_worker:
-            log_signal.emit(2, '已有任务在运行，请先停止当前任务')
+            log_signal.emit(2, 'A task is already running; stop it first')
             return False
         current_dir = os.path.basename(config_set.config_dir)
         if config_dir != current_dir:
             try:
                 from core.config.config_set import ConfigSet
-                log_signal.emit(1, f'常驻模式切换配置: {current_dir} -> {config_dir}')
+                log_signal.emit(1, f'Persistent mode switching configuration: {current_dir} -> {config_dir}')
                 new_config_set = ConfigSet(config_dir=config_dir)
                 new_baas = baas.__class__(new_config_set, log_signal, button_signal, update_signal, None)
                 new_baas.set_ocr(baas.ocr)
                 if not new_baas.init_all_data():
-                    log_signal.emit(3, f'配置 {config_dir} 初始化失败')
+                    log_signal.emit(3, f'Failed to initialize configuration {config_dir}')
                     return False
+                _stop_game_on_config_switch(baas, new_baas, log_signal)
                 baas = new_baas
                 config_set = new_config_set
                 _emit_virtual_display(_virtual_display_data(baas, config_set, running=True))
             except Exception as e:
-                log_signal.emit(3, f'切换配置失败: {e}')
+                log_signal.emit(3, f'Failed to switch configuration: {e}')
                 return False
-        if getattr(baas.config, 'screenshot_method', '') != 'virtual_scrcpy':
-            log_signal.emit(3, f'配置 {config_dir} 未使用 virtual_scrcpy')
+        if getattr(baas.config, 'screenshot_method', '') not in DISPLAY_METHODS:
+            log_signal.emit(3, f'Configuration {config_dir} does not use a virtual display backend')
             return False
         return ensure_virtual_display_package()
 
     def ensure_virtual_display_package():
         try:
-            from core.device.virtual_scrcpy_client import VirtualScrcpyClient
-            cli = VirtualScrcpyClient.get_instance(baas.serial)
+            cli = _display_client(baas)
             current_package = cli.get_foreground_package()
             log_signal.emit(1, f'Virtual display foreground package: {current_package}')
             if current_package != baas.package_name:
@@ -423,7 +436,7 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
             _emit_virtual_display(_virtual_display_data(baas, config_set, running=True))
             return True
         except Exception as e:
-            log_signal.emit(3, f'虚拟屏幕包名检查失败: {e}')
+            log_signal.emit(3, f'Failed to check the virtual display package: {e}')
             return False
 
     def start_job(name, label, current_task, action):
@@ -431,12 +444,12 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
 
         def _target():
             try:
-                log_signal.emit(1, f'--- 常驻模式: {label}启动 ---')
+                log_signal.emit(1, f'--- Persistent mode: {label} started ---')
                 _emit_status({'running': True, 'currentTask': current_task})
                 action()
-                log_signal.emit(1, f'--- 常驻模式: {label}结束 ---')
+                log_signal.emit(1, f'--- Persistent mode: {label} finished ---')
             except Exception as e:
-                log_signal.emit(3, f'常驻模式任务异常: {e}')
+                log_signal.emit(3, f'Persistent mode task failed: {e}')
             finally:
                 _emit_status({'running': False, 'currentTask': None})
                 if name == 'baas-managed':
@@ -444,7 +457,7 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
 
         with worker_lock:
             if worker_alive():
-                log_signal.emit(2, '已有任务在运行，请先停止当前任务')
+                log_signal.emit(2, 'A task is already running; stop it first')
                 return False
             baas.flag_run = True
             worker = threading.Thread(target=_target, name=name, daemon=True)
@@ -467,7 +480,7 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
 
         baas.flag_run = True
         if not baas.solve('restart'):
-            log_signal.emit(3, f'托管模式初始化主界面失败: {config_dir}')
+            log_signal.emit(3, f'Managed mode failed to initialize the main page: {config_dir}')
             return False
 
         next_task = baas.scheduler.heartbeat()
@@ -535,13 +548,13 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
         managed_configs = list(config_dirs)
         cursor = 0
         idle_low_power = False
-        log_signal.emit(1, f'--- 托管模式启动: {managed_configs} ---')
+        log_signal.emit(1, f'--- Managed mode started: {managed_configs} ---')
         _emit_managed_mode(running=True, configs=managed_configs, phase='starting')
         while baas.flag_run:
             config_dir, event, idx = _find_due_config(managed_configs, cursor)
             if config_dir:
                 idle_low_power = False
-                log_signal.emit(1, f'托管模式批处理配置: {config_dir}')
+                log_signal.emit(1, f'Managed mode processing configuration: {config_dir}')
                 while baas.flag_run:
                     try:
                         due = _due_events(config_dir)
@@ -550,11 +563,11 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
                     if not due:
                         break
                     event = due[0]
-                    event_name = event.get('event_name', event.get('func_name', '调度任务'))
-                    log_signal.emit(1, f'托管模式执行: {config_dir} · {event_name}')
+                    event_name = event.get('event_name', event.get('func_name', 'Scheduled tasks'))
+                    log_signal.emit(1, f'Managed mode executing: {config_dir} · {event_name}')
                     ok = run_one_scheduled_event(config_dir, event)
                     if not ok:
-                        log_signal.emit(3, '托管模式任务失败，停止托管')
+                        log_signal.emit(3, 'Managed task failed; stopping managed mode')
                         baas.flag_run = False
                         break
                 cursor = (idx + 1) % len(managed_configs)
@@ -563,7 +576,7 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
             next_wake = _next_enabled_tick(managed_configs)
             _emit_status({
                 'running': True,
-                'currentTask': '托管待机',
+                'currentTask': 'Managed idle',
                 'managedMode': {
                     'running': True,
                     'configs': managed_configs,
@@ -573,7 +586,7 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
                 }
             })
             if not idle_low_power:
-                log_signal.emit(1, '托管模式无到点任务，退出游戏并息屏待机')
+                log_signal.emit(1, 'No managed tasks are due; exit the game and turn off the physical screen for idle')
                 enter_managed_idle(managed_configs)
                 idle_low_power = True
 
@@ -585,9 +598,9 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
                     break
                 time.sleep(1)
 
-        log_signal.emit(1, '--- 托管模式结束 ---')
+        log_signal.emit(1, '--- Managed mode finished ---')
 
-    log_signal.emit(1, '--- 常驻模式: 虚拟屏幕已启动，等待任务命令 ---')
+    log_signal.emit(1, '--- Persistent mode: virtual display started; waiting for task commands ---')
     _emit_virtual_display(_virtual_display_data(baas, config_set, running=True))
 
     for raw in sys.stdin:
@@ -597,23 +610,23 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
         try:
             msg = json.loads(raw)
         except json.JSONDecodeError:
-            log_signal.emit(2, f'忽略无效命令: {raw}')
+            log_signal.emit(2, f'Ignoring invalid command: {raw}')
             continue
 
         cmd = msg.get('cmd')
         if cmd == 'start_scheduler':
             if ensure_config(msg.get('configDir')):
-                start_job('baas-scheduler', '调度任务', None, baas.thread_starter)
+                start_job('baas-scheduler', 'Scheduled tasks', None, baas.thread_starter)
         elif cmd == 'start_managed':
             configs = msg.get('configs') or []
             configs = [str(config).strip() for config in configs if str(config).strip()]
             configs = list(dict.fromkeys(configs))
             if not configs:
-                log_signal.emit(2, '托管模式未选择配置文件')
+                log_signal.emit(2, 'No configurations selected for managed mode')
                 continue
             _emit_status({
                 'running': True,
-                'currentTask': '托管待机',
+                'currentTask': 'Managed idle',
                 'managedMode': {
                     'running': True,
                     'configs': configs,
@@ -622,19 +635,19 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
                     'phase': 'starting',
                 }
             })
-            if not start_job('baas-managed', '托管模式', '托管待机', lambda: managed_loop(configs)):
+            if not start_job('baas-managed', 'Managed mode', 'Managed idle', lambda: managed_loop(configs)):
                 _emit_managed_mode()
         elif cmd == 'run_task':
             task = msg.get('task', '').strip()
             options = msg.get('options') or {}
             if task and ensure_config(msg.get('configDir')):
-                start_job(f'baas-task-{task}', f'单次任务: {task}', task, lambda: run_with_task_options(task, options))
+                start_job(f'baas-task-{task}', f'One-shot task: {task}', task, lambda: run_with_task_options(task, options))
         elif cmd == 'stop_task':
             if worker_alive():
-                log_signal.emit(1, '停止当前任务请求已发送')
+                log_signal.emit(1, 'Stop request sent for the current task')
                 baas.flag_run = False
             else:
-                log_signal.emit(1, '当前没有正在运行的任务')
+                log_signal.emit(1, 'No task is currently running')
             _emit_status({'running': False, 'currentTask': None})
             _emit_managed_mode()
         elif cmd == 'virtual_status':
@@ -643,15 +656,16 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
             _wake_unlock_and_turn_screen_off(baas, config_set, log_signal)
         elif cmd == 'shutdown_virtual_display':
             if worker_alive():
-                log_signal.emit(2, '任务运行中，请先停止任务再关闭虚拟屏幕')
+                log_signal.emit(2, 'A task is running; stop it before closing the virtual display')
                 continue
-            log_signal.emit(1, '--- 常驻模式: 关闭虚拟屏幕 ---')
-            _send_power_key(baas.serial, log_signal)
+            log_signal.emit(1, '--- Persistent mode: closing the virtual display ---')
+            if baas.config.screenshot_method == 'virtual_scrcpy':
+                _send_power_key(baas.serial, log_signal)
             _emit_virtual_display(_virtual_display_data(baas, config_set, running=False))
             _cleanup_virtual_scrcpy()
             return
         else:
-            log_signal.emit(2, f'未知命令: {cmd}')
+            log_signal.emit(2, f'Unknown command: {cmd}')
 
 # ── 主流程 ────────────────────────────────────────────────────────────────────
 
@@ -666,7 +680,7 @@ def main():
     # 检查 config 目录
     cfg_path = os.path.join(os.path.dirname(__file__), 'config', config_dir)
     if not os.path.exists(os.path.join(cfg_path, 'config.json')):
-        log_signal.emit(3, f'config/{config_dir}/config.json 不存在，请先创建配置')
+        log_signal.emit(3, f'config/{config_dir}/config.json does not exist; create the configuration first')
         sys.exit(1)
 
     try:
@@ -675,8 +689,8 @@ def main():
         from core.config.config_set import ConfigSet
         from core.config.default_config import STATIC_DEFAULT_CONFIG
     except ImportError as e:
-        log_signal.emit(3, f'导入 BAAS 失败: {e}')
-        log_signal.emit(3, '请确认依赖已安装: pip install -r requirements-linux.txt')
+        log_signal.emit(3, f'Failed to import BAAS: {e}')
+        log_signal.emit(3, 'Ensure dependencies are installed: pip install -r requirements-linux.txt')
         sys.exit(1)
 
     # 用最新的 default_config 刷新 config/static.json（GUI 启动时由 window.py 完成，WebUI 需手动触发）
@@ -685,9 +699,9 @@ def main():
         with open(static_json_path, 'w', encoding='utf-8') as _f:
             _f.write(STATIC_DEFAULT_CONFIG)
     except Exception as e:
-        log_signal.emit(2, f'刷新 static.json 失败（活动数据可能过旧）: {e}')
+        log_signal.emit(2, f'Failed to refresh static.json (event data may be outdated): {e}')
 
-    log_signal.emit(1, '--- BAAS WebUI Runner 启动 ---')
+    log_signal.emit(1, '--- BAAS WebUI Runner started ---')
 
     try:
         import json as _json
@@ -714,23 +728,23 @@ def main():
             ocr_needed = ['zh-cn', 'en-us', 'ja-jp', 'ko-kr', 'zh-tw']
         else:
             ocr_needed = _server_lang.get(_server, ['zh-cn', 'en-us'])
-        log_signal.emit(1, f'服务器: {_server}，加载 OCR 语言: {ocr_needed}')
+        log_signal.emit(1, f'Server: {_server}; loading OCR languages: {ocr_needed}')
         main_instance = Main(logger_signal=log_signal, ocr_needed=ocr_needed)
     except Exception as e:
-        log_signal.emit(3, f'OCR 初始化失败: {e}')
+        log_signal.emit(3, f'OCR initialization failed: {e}')
         sys.exit(1)
 
     try:
         config_set = ConfigSet(config_dir=config_dir)
     except Exception as e:
-        log_signal.emit(3, f'配置加载失败: {e}')
+        log_signal.emit(3, f'Failed to load configuration: {e}')
         sys.exit(1)
 
     baas = Baas_thread(config_set, log_signal, button_signal, update_signal, None)
     baas.set_ocr(main_instance.ocr)
 
     if not baas.init_all_data():
-        log_signal.emit(3, '初始化失败，请检查设备连接和配置')
+        log_signal.emit(3, 'Initialization failed; check the device connection and configuration')
         sys.exit(1)
 
     if persistent:
@@ -742,7 +756,7 @@ def main():
     # 一次性任务模式：BAAS_TASK 指定任务名，执行完即退出
     one_shot = os.environ.get('BAAS_TASK', '').strip()
     if one_shot:
-        log_signal.emit(1, f'--- 单次任务模式: {one_shot} ---')
+        log_signal.emit(1, f'--- One-shot task mode: {one_shot} ---')
         try:
             task_options = json.loads(os.environ.get('BAAS_TASK_OPTIONS', '{}'))
         except json.JSONDecodeError:
@@ -752,7 +766,7 @@ def main():
             baas.solve(one_shot)
         finally:
             _restore_task_options(baas, previous)
-        log_signal.emit(1, f'--- 任务完成: {one_shot} ---')
+        log_signal.emit(1, f'--- Task finished: {one_shot} ---')
         return
 
     # 定期汇报资源数据

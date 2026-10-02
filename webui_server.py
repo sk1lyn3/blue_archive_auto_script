@@ -26,6 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from core.device.adb_path import adb_directory, adb_executable
+from core.device.display_backend import DISPLAY_METHODS
 
 VIRTUAL_DISPLAY_IDLE = {'running': False, 'starting': False, 'displayId': None, 'configDir': None}
 MANAGED_MODE_IDLE = {
@@ -133,7 +134,7 @@ def _config_screenshot_method(config_dir: str) -> str:
         return ''
 
 def _uses_virtual_scrcpy() -> bool:
-    return _active_screenshot_method() == 'virtual_scrcpy'
+    return _active_screenshot_method() in DISPLAY_METHODS
 
 def _virtual_display_alive() -> bool:
     vd = _state.get('virtualDisplay') or {}
@@ -153,7 +154,7 @@ async def _wait_virtual_display_running(timeout: float = 60.0) -> bool:
 
 def _runner_cmd(cmd: dict) -> tuple[bool, str | None]:
     if not _proc_alive(_proc) or _proc.stdin is None:
-        return False, '虚拟屏幕未启动'
+        return False, 'The virtual display is not running'
     try:
         _proc.stdin.write(json.dumps(cmd, ensure_ascii=False) + '\n')
         _proc.stdin.flush()
@@ -253,18 +254,13 @@ async def _queue_broadcaster() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # 启动时清理残留的 runner 进程（上次 webui_server 异常退出遗留）
-    try:
-        result = subprocess.run(['pgrep', '-f', '_webui_runner.py'], capture_output=True, text=True)
-        for pid_str in result.stdout.split():
-            try:
-                os.kill(int(pid_str), 15)  # SIGTERM
-            except (ProcessLookupError, PermissionError, ValueError):
-                pass
-    except FileNotFoundError:
-        pass  # pgrep 不存在则跳过
+    # Each server owns its children; never kill another server's runner.
     asyncio.create_task(_queue_broadcaster())
-    yield
+    try:
+        yield
+    finally:
+        _terminate_proc(_proc)
+        _terminate_proc(_oneshot_proc)
 
 app = FastAPI(lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=['*'], allow_methods=['*'],
@@ -354,18 +350,18 @@ async def put_config(body: dict):
 async def start_script(body: dict = {}):
     global _proc, _config_dir
     if _managed_mode_running():
-        return {'ok': False, 'error': '托管模式正在运行，请先停止托管模式'}
+        return {'ok': False, 'error': 'Managed mode is running; stop it first'}
     cfg = body.get('configDir', _config_dir)
     if cfg:
         _config_dir = cfg
     if _uses_virtual_scrcpy():
         ok, err = _runner_cmd({'cmd': 'start_scheduler', 'configDir': _config_dir})
         if not ok:
-            return {'ok': False, 'error': err or '请先启动虚拟屏幕'}
+            return {'ok': False, 'error': err or 'Start the virtual display first'}
         _set_status(running=True, currentTask=None)
         return {'ok': True}
     if _any_runner_alive():
-        return {'ok': False, 'error': '已在运行中'}
+        return {'ok': False, 'error': 'Already running'}
     if _state['running']:
         _set_idle_status()
     _proc = _start_runner(_runner_env(BAAS_CONFIG_DIR=cfg))
@@ -379,7 +375,7 @@ async def stop_script():
     if _virtual_display_alive():
         ok, err = _runner_cmd({'cmd': 'stop_task'})
         if not ok:
-            return {'ok': False, 'error': err or '停止任务失败'}
+            return {'ok': False, 'error': err or 'Failed to stop the task'}
         _terminate_proc(_oneshot_proc)
         _oneshot_proc = None
         _set_idle_status()
@@ -394,6 +390,7 @@ async def stop_script():
     return {'ok': True}
 
 _ALLOWED_TASKS = {
+    'restart', 'mail',
     'explore_activity_story', 'explore_activity_mission', 'explore_activity_challenge',
     'explore_normal_task', 'explore_hard_task',
     'main_story', 'group_story', 'mini_story',
@@ -405,7 +402,7 @@ async def run_task(body: dict):
     global _oneshot_proc, _config_dir
     from fastapi import HTTPException
     if _managed_mode_running():
-        raise HTTPException(409, '托管模式正在运行，请先停止托管模式')
+        raise HTTPException(409, 'Managed mode is running; stop it first')
     cfg = body.get('configDir', _config_dir)
     if cfg:
         _config_dir = cfg
@@ -416,13 +413,13 @@ async def run_task(body: dict):
     if _uses_virtual_scrcpy():
         ok, err = _runner_cmd({'cmd': 'run_task', 'task': task, 'configDir': _config_dir, 'options': options})
         if not ok:
-            raise HTTPException(409, err or '请先启动虚拟屏幕')
+            raise HTTPException(409, err or 'Start the virtual display first')
         _set_status(running=True, currentTask=task)
         return {'ok': True}
     if _proc_alive(_proc):
-        raise HTTPException(409, '主调度器正在运行，请先停止')
+        raise HTTPException(409, 'The scheduler is running; stop it first')
     if _proc_alive(_oneshot_proc):
-        raise HTTPException(409, '已有单次任务在运行')
+        raise HTTPException(409, 'A one-shot task is already running')
     _oneshot_proc = _start_runner(_runner_env(
         BAAS_CONFIG_DIR=_config_dir,
         BAAS_TASK=task,
@@ -440,14 +437,14 @@ async def start_virtual_display(body: dict = {}):
     if cfg:
         _config_dir = cfg
     if not _uses_virtual_scrcpy():
-        raise HTTPException(400, '当前配置未使用 virtual_scrcpy')
+        raise HTTPException(400, 'The current configuration does not use a virtual display backend')
     if _proc_alive(_proc):
         ok, err = _runner_cmd({'cmd': 'virtual_status'})
         if not ok:
-            return {'ok': False, 'error': err or '虚拟屏幕状态查询失败'}
+            return {'ok': False, 'error': err or 'Failed to query virtual display status'}
         return {'ok': True}
     if _proc_alive(_oneshot_proc):
-        raise HTTPException(409, '已有单次任务在运行')
+        raise HTTPException(409, 'A one-shot task is already running')
 
     _state['virtualDisplay'] = VIRTUAL_DISPLAY_IDLE.copy()
     _set_virtual_display(starting=True, configDir=_config_dir)
@@ -459,13 +456,13 @@ async def start_virtual_display(body: dict = {}):
 async def stop_virtual_display():
     global _proc
     if _managed_mode_running():
-        return {'ok': False, 'error': '托管模式运行中，请先停止托管模式'}
+        return {'ok': False, 'error': 'Managed mode is running; stop it first'}
     if _state.get('running'):
-        return {'ok': False, 'error': '任务运行中，请先停止任务'}
+        return {'ok': False, 'error': 'A task is running; stop it first'}
     if _proc_alive(_proc):
         ok, err = _runner_cmd({'cmd': 'shutdown_virtual_display'})
         if not ok:
-            return {'ok': False, 'error': err or '关闭虚拟屏幕失败'}
+            return {'ok': False, 'error': err or 'Failed to close the virtual display'}
         try:
             _proc.wait(timeout=8)
         except subprocess.TimeoutExpired:
@@ -483,24 +480,24 @@ async def start_managed_mode(body: dict):
     global _proc, _config_dir
     from fastapi import HTTPException
     if _managed_mode_running():
-        raise HTTPException(409, '托管模式已在运行')
+        raise HTTPException(409, 'Managed mode is already running')
     configs = body.get('configs') or []
     if not isinstance(configs, list):
         raise HTTPException(400, 'configs must be a list')
     configs = [str(c).strip() for c in configs if str(c).strip()]
     configs = list(dict.fromkeys(configs))
     if not configs:
-        raise HTTPException(400, '至少选择一个配置文件')
+        raise HTTPException(400, 'Select at least one configuration')
     base = os.path.join(os.path.dirname(__file__), 'config')
     for cfg in configs:
         if not os.path.isdir(os.path.join(base, cfg)):
-            raise HTTPException(404, f'配置不存在: {cfg}')
-        if _config_screenshot_method(cfg) != 'virtual_scrcpy':
-            raise HTTPException(400, f'配置 {cfg} 未使用 virtual_scrcpy')
+            raise HTTPException(404, f'Configuration not found: {cfg}')
+        if _config_screenshot_method(cfg) not in DISPLAY_METHODS:
+            raise HTTPException(400, f'Configuration {cfg} does not use a virtual display backend')
     if _proc_alive(_oneshot_proc):
-        raise HTTPException(409, '已有单次任务在运行')
+        raise HTTPException(409, 'A one-shot task is already running')
     if _state.get('running') and not _managed_mode_running():
-        raise HTTPException(409, '已有任务在运行')
+        raise HTTPException(409, 'A task is already running')
 
     _config_dir = configs[0]
     started_runner = False
@@ -513,12 +510,12 @@ async def start_managed_mode(body: dict):
 
     if started_runner or not _virtual_display_running():
         if not await _wait_virtual_display_running():
-            raise HTTPException(504, '虚拟屏幕启动超时')
+            raise HTTPException(504, 'Virtual display startup timed out')
 
     ok, err = _runner_cmd({'cmd': 'start_managed', 'configs': configs})
     if not ok:
-        raise HTTPException(409, err or '托管模式启动失败')
-    _set_status(running=True, currentTask='托管待机')
+        raise HTTPException(409, err or 'Failed to start managed mode')
+    _set_status(running=True, currentTask='Managed idle')
     _set_managed_mode(running=True, configs=configs, currentConfig=None, nextWakeAt=None, phase='starting')
     return {'ok': True}
 
@@ -529,7 +526,7 @@ async def stop_managed_mode():
         return {'ok': True}
     ok, err = _runner_cmd({'cmd': 'stop_task'})
     if not ok:
-        return {'ok': False, 'error': err or '托管模式停止失败'}
+        return {'ok': False, 'error': err or 'Failed to stop managed mode'}
     _set_idle_status()
     _reset_managed_mode()
     return {'ok': True}
@@ -538,12 +535,12 @@ async def stop_managed_mode():
 async def wake_unlock_screen_off():
     from fastapi import HTTPException
     if not _uses_virtual_scrcpy():
-        raise HTTPException(400, '当前配置未使用 virtual_scrcpy')
+        raise HTTPException(400, 'The current configuration does not use a virtual display backend')
     if not _virtual_display_alive():
-        raise HTTPException(409, '虚拟屏幕未启动')
+        raise HTTPException(409, 'The virtual display is not running')
     ok, err = _runner_cmd({'cmd': 'wake_unlock_screen_off'})
     if not ok:
-        raise HTTPException(409, err or '唤醒解锁并关屏失败')
+        raise HTTPException(409, err or 'Failed to wake/unlock the device and turn off the physical screen')
     return {'ok': True}
 
 @app.get('/api/activity')
@@ -652,7 +649,7 @@ async def set_active_config(body: dict):
 async def adb_connect(body: dict):
     serial = body.get('serial', '')
     if not serial:
-        return {'ok': False, 'error': '未提供设备地址'}
+        return {'ok': False, 'error': 'No device address provided'}
     try:
         if ':' in serial:
             r = subprocess.run([adb_executable(), 'connect', serial], capture_output=True, text=True, timeout=10)
@@ -662,11 +659,11 @@ async def adb_connect(body: dict):
         r = subprocess.run([adb_executable(), '-s', serial, 'get-state'], capture_output=True, text=True, timeout=10)
         output = (r.stdout + r.stderr).strip()
         ok = r.returncode == 0 and output.strip() == 'device'
-        return {'ok': ok, 'output': output or ('设备在线' if ok else '设备不可用')}
+        return {'ok': ok, 'output': output or ('Device online' if ok else 'Device unavailable')}
     except FileNotFoundError:
-        return {'ok': False, 'error': 'adb 未安装，请先安装 Android Platform Tools'}
+        return {'ok': False, 'error': 'adb is not installed; install Android Platform Tools first'}
     except subprocess.TimeoutExpired:
-        return {'ok': False, 'error': 'ADB 连接超时'}
+        return {'ok': False, 'error': 'ADB connection timed out'}
 
 # ── WebSocket ────────────────────────────────────────────────────────────────
 

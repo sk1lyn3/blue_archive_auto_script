@@ -325,6 +325,9 @@ class Connection:
 
     def get_current_package(self):
         self.logger.info("Get Current Package.")
+        if self.config.screenshot_method == 'android_companion':
+            from core.device.android_companion.client import AndroidCompanionClient
+            return AndroidCompanionClient.get_instance(self.serial).get_foreground_package()
         for _ in range(3):
             d = adb.device(self.serial)
             try:

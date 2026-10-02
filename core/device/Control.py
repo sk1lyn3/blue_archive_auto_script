@@ -31,6 +31,9 @@ class Control:
                 self.control_instance = U2Control(self.connection)
             elif self.method == "scrcpy":
                 self.control_instance = ScrcpyControl(self.connection)
+            elif self.method == "android_companion":
+                from core.device.control.android_companion import AndroidCompanionControl
+                self.control_instance = AndroidCompanionControl(self.connection)
         else:
             if sys.platform == "win32":
                 from core.device.control.pyautogui import PyautoguiControl

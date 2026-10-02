@@ -35,6 +35,9 @@ class Screenshot:
                 self.screenshot_instance = U2Screenshot(self.connection)
             elif self.method == "scrcpy":
                 self.screenshot_instance = ScrcpyScreenshot(self.connection)
+            elif self.method == "android_companion":
+                from core.device.screenshot.android_companion import AndroidCompanionScreenshot
+                self.screenshot_instance = AndroidCompanionScreenshot(self.connection)
         else:
             if sys.platform == "win32":
                 from core.device.screenshot.pyautogui import PyautoguiScreenshot

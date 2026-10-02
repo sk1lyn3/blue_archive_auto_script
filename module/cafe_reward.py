@@ -120,6 +120,8 @@ def gift_to_cafe(self):
 def zoom_out(self):
     if self.is_android_device:
         self.pinch(640, 360, 300, 50, steps=30)
+        if self.config.screenshot_method in ('virtual_scrcpy', 'android_companion'):
+            time.sleep(0.2)
     else:
         for _ in range(0, 15):
             self.control.scroll(640, 360, 10)
@@ -134,7 +136,7 @@ def swipe_gift_thread(self, duration, ret_queue):
 def swipe_gift_and_screenshot(self):
     shotDelay = self.config.cafe_reward_interaction_shot_delay
     if self.is_android_device:
-        if self.config.screenshot_method == 'virtual_scrcpy':
+        if self.config.screenshot_method in ('virtual_scrcpy', 'android_companion'):
             shotDelay = max(shotDelay, 0.6)
         t1 = threading.Thread(target=screenshot_thread, args=(self, shotDelay))
         t1.start()
