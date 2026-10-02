@@ -14,7 +14,7 @@ import time
 from typing import Any
 from uuid import uuid4
 
-from .adb_bridge import CompanionClient
+from .adb_bridge import APP_ID, CompanionClient
 
 SOCKET_NAME = "baas-companion-v1"
 
@@ -57,6 +57,15 @@ class MiddlewareClient:
             # Cold bootstrap uses the same wake/dismiss sequence as BAAS. A live
             # daemon connection avoids opening a physical-screen Activity at all.
             try:
+                installed = self.adb._shell(["pm", "path", APP_ID], check=False)
+                if installed.returncode != 0 and installed.stderr.strip():
+                    raise MiddlewareError(f"Cannot check Android Companion installation: {installed.stderr.strip()}")
+                if not any(line.startswith("package:") for line in installed.stdout.splitlines()):
+                    raise MiddlewareError(
+                        f"Android Companion ({APP_ID}) is not installed on device {self.adb.serial}. "
+                        "Install the Companion APK on this device, start Shizuku, "
+                        "and grant Companion permission before retrying."
+                    )
                 self.adb._shell(["input", "keyevent", "224"])
                 self.adb._shell(["wm", "dismiss-keyguard"], check=False)
                 result = self.adb.command("ping")
@@ -165,4 +174,3 @@ class MiddlewareClient:
                     raise
             time.sleep(0.1)
         raise TimeoutError(f"No suitable frame within {timeout}s: {last}")
-
