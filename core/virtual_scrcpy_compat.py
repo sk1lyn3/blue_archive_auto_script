@@ -80,7 +80,7 @@ def _patch_color():
 
     def _rgb_in_range(self, x, y, r_min, r_max, g_min, g_max, b_min, b_max,
                       check_nearby=False, nearby_range=1):
-        if getattr(getattr(self, 'config', None), 'screenshot_method', '') == 'virtual_scrcpy':
+        if getattr(getattr(self, 'config', None), 'screenshot_method', '') in ('virtual_scrcpy', 'android_companion'):
             tol = 15
             r_min = max(0, r_min - tol); r_max = min(255, r_max + tol)
             g_min = max(0, g_min - tol); g_max = min(255, g_max + tol)

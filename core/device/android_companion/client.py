@@ -156,7 +156,10 @@ class AndroidCompanionClient:
     def turn_screen_off(self):
         with self.lock:
             self._ready()
-            self.transport.command('wake')
+            # A dark physical panel does not mean Android is asleep. Avoid
+            # restoring panel power between tasks when the device is interactive.
+            if not self._status()['interactive']:
+                self.transport.command('wake')
             self.transport.command('screen', off=True)
 
     def get_foreground_package(self):

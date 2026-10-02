@@ -162,7 +162,7 @@ def _wake_unlock_and_turn_screen_off(baas, config_set, log_signal):
         serial = baas.serial
         display_state = _physical_display_state(serial)
         log_signal.emit(1, f'Physical display state before wake: {display_state}')
-        if display_state == 'OFF':
+        if display_state == 'OFF' and baas.config.screenshot_method != 'android_companion':
             subprocess.run(
                 [adb_executable(), '-s', serial, 'shell', 'input', 'keyevent', 'KEYCODE_WAKEUP'],
                 capture_output=True,
@@ -471,10 +471,11 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
         finally:
             _restore_task_options(baas, previous)
 
-    def run_one_scheduled_event(config_dir, event_hint):
+    def run_one_scheduled_event(config_dir, event_hint, prepare_screen=False):
         if not ensure_config(config_dir, allow_worker=True):
             return False
-        _wake_unlock_and_turn_screen_off(baas, config_set, log_signal)
+        if prepare_screen and not _wake_unlock_and_turn_screen_off(baas, config_set, log_signal):
+            return False
         if not ensure_virtual_display_package():
             return False
 
@@ -548,6 +549,7 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
         managed_configs = list(config_dirs)
         cursor = 0
         idle_low_power = False
+        prepare_screen = True
         log_signal.emit(1, f'--- Managed mode started: {managed_configs} ---')
         _emit_managed_mode(running=True, configs=managed_configs, phase='starting')
         while baas.flag_run:
@@ -565,7 +567,8 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
                     event = due[0]
                     event_name = event.get('event_name', event.get('func_name', 'Scheduled tasks'))
                     log_signal.emit(1, f'Managed mode executing: {config_dir} · {event_name}')
-                    ok = run_one_scheduled_event(config_dir, event)
+                    ok = run_one_scheduled_event(config_dir, event, prepare_screen=prepare_screen)
+                    prepare_screen = False
                     if not ok:
                         log_signal.emit(3, 'Managed task failed; stopping managed mode')
                         baas.flag_run = False
@@ -589,6 +592,7 @@ def _command_loop(baas, config_set, log_signal, button_signal, update_signal):
                 log_signal.emit(1, 'No managed tasks are due; exit the game and turn off the physical screen for idle')
                 enter_managed_idle(managed_configs)
                 idle_low_power = True
+                prepare_screen = True
 
             wait_time = 30
             if next_wake:
