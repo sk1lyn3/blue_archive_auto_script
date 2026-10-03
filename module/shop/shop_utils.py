@@ -1,7 +1,9 @@
 import time
+from statistics import median
 
 from core import picture, image, color
-from core.utils import build_possible_string_dict_and_length, most_similar_string
+from core.utils import build_possible_string_dict_and_length, most_similar_string, merge_nearby_coordinates
+from core.exception import FunctionCallTimeout
 
 SHOP_ITEM_ROW_X = {
     'CN': [648, 799, 949, 1100],
@@ -29,6 +31,30 @@ def to_common_shop(self, skip_first_screenshot=False):
     }
     img_possibles.update(picture.GAME_ONE_TIME_POP_UPS[self.server])
     picture.co_detect(self, None, rgb_possibles, img_ends, img_possibles, skip_first_screenshot)
+
+def _wait_shop_row_stable(self, shop_pos):
+    # Follow the already identified row while the list finishes scrolling.
+    deadline = time.monotonic() + 3
+    stable_frames = 0
+    while time.monotonic() < deadline:
+        time.sleep(0.2)
+        self.update_screenshot_array()
+        positions = image.get_image_all_appear_position(
+            self, "shop_list-type-name-feature", (0, 102, 25, 569), 0.8)
+        groups = merge_nearby_coordinates(positions, 10, 10)
+        rows = [(median([p[0] for p in group]),
+                 median([p[1] for p in group])) for group in groups]
+        nearby = [p for p in rows if abs(p[1] - shop_pos[1]) < 35]
+        if not nearby:
+            stable_frames = 0
+            continue
+        current = min(nearby, key=lambda p: abs(p[1] - shop_pos[1]))
+        stable_frames = stable_frames + 1 if abs(current[1] - shop_pos[1]) <= 1 else 0
+        shop_pos = current
+        if stable_frames >= 2:
+            return shop_pos
+    raise FunctionCallTimeout("Shop row did not settle after scrolling")
+
 
 def goto_shop_by_name(self, name_idx):
     possible_names = self.static_config.shop_type_list_names[self.identifier]
@@ -63,6 +89,7 @@ def goto_shop_by_name(self, name_idx):
         first_retry_dir=0,
         deduplication_pixels=(10, 10)
     )
+    shop_pos = _wait_shop_row_stable(self, shop_pos)
     shop_pos = (int(shop_pos[0]), int(shop_pos[1]))
     shop_not_selected_rgb_feature_name = "temp_shop_not_selected"
     shop_selected_rgb_feature_name = "temp_shop_selected"
@@ -80,7 +107,7 @@ def goto_shop_by_name(self, name_idx):
         shop_not_selected_rgb_feature_name: (shop_pos[0] + 100, shop_pos[1] + 30),
     }
     rgb_ends = shop_selected_rgb_feature_name
-    picture.co_detect(self, rgb_ends, rgb_possibles, None, None, False)
+    picture.co_detect(self, rgb_ends, rgb_possibles, None, None, True)
     color.remove_rgb_feature(self, shop_not_selected_rgb_feature_name)
     color.remove_rgb_feature(self, shop_selected_rgb_feature_name)
 
