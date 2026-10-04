@@ -120,4 +120,3 @@ class CompanionClient:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
-
