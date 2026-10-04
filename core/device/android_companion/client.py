@@ -31,6 +31,7 @@ class AndroidCompanionClient:
         self.dirty = False
         self.last_metadata = None
         self.packages = set()
+        self.active_package = None
         self._closing = threading.Event()
         self._heartbeat = None
         self._heartbeat_error = None
@@ -114,7 +115,30 @@ class AndroidCompanionClient:
     def _input(self, command, **arguments):
         with self.lock:
             self._ready()
-            reply = self.transport.command(command, **arguments)
+            for attempt in range(3):
+                try:
+                    reply = self.transport.command(command, **arguments)
+                    break
+                except MiddlewareError as error:
+                    failure = error.reply
+                    # Only an explicit pre-injection rejection is safe to replay.
+                    if command != 'click' or not failure:
+                        raise
+                    try:
+                        state = self._status()
+                    except Exception as status_error:
+                        raise MiddlewareError(f'{error}; status check failed: {status_error}',
+                                              reply=failure) from error
+                    if (attempt == 2 or failure.get('delivery') != 'not_sent' or
+                            failure.get('retryable') is not True):
+                        raise MiddlewareError(
+                            f"{error}; display={state.get('displayId')} alive={state.get('alive')} "
+                            f"frameAgeMs={state.get('frameAgeMs')}", reply=failure) from error
+                    if state.get('displayId') != self.display_id or not state.get('alive'):
+                        raise MiddlewareError('Click recovery aborted: display session changed') from error
+                    if self.active_package and self.get_foreground_package() != self.active_package:
+                        raise MiddlewareError('Click recovery aborted: target game is not in foreground') from error
+                    time.sleep(.3)
             with self.frame_state_lock:
                 self.completed_ns = reply['completedNs']
                 self.dirty = True
@@ -148,6 +172,7 @@ class AndroidCompanionClient:
         with self.lock:
             self._input('launch', package=package, activity=activity or '')
             self.packages.add(package)
+            self.active_package = package
 
     def app_stop(self, package):
         with self.lock:

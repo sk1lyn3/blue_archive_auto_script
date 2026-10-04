@@ -18,12 +18,7 @@ import module.explore_tasks.explore_task
 from core import position, picture, utils
 from core.config.config_set import ConfigSet
 from core.device import emulator_manager
-from core.device.Control import Control
-from core.device.Screenshot import Screenshot
-from core.device.connection import Connection
 from core.device.emulator_manager import process_api
-from core.device.uiautomator2_client import BAAS_U2_Initer, __atx_agent_version__
-from core.device.uiautomator2_client import U2Client
 from core.exception import RequestHumanTakeOver, FunctionCallTimeout, PackageIncorrect, LogTraceback
 from core.notification import notify, toast
 from core.pushkit import push
@@ -322,6 +317,9 @@ class Baas_thread:
             self.logger.error("Emulator start failed")
             return False
         try:
+            from core.device.Control import Control
+            from core.device.Screenshot import Screenshot
+            from core.device.connection import Connection
             self.connection = Connection(self)
             self.is_android_device = self.connection.is_android_device()
             self.server = self.connection.get_server()
@@ -413,6 +411,7 @@ class Baas_thread:
                 raise Exception("Global Server Invalid Language : " + game_lan + ".")
 
     def check_atx(self):
+        from core.device.uiautomator2_client import __atx_agent_version__
         self.logger.info("--------------Check ATX install ----------------")
         _d = self.u2._wait_for_device()
         if not _d:
@@ -430,6 +429,7 @@ class Baas_thread:
         self.logger.info("Uiautomator2 service started.")
 
     def set_up_atx_agent(self):
+        from core.device.uiautomator2_client import BAAS_U2_Initer
         init = BAAS_U2_Initer(self.u2._adb_device, self.logger)
         init.install()
 
@@ -1163,6 +1163,7 @@ class Baas_thread:
             self.u2 = AndroidCompanionProxy(self.serial)
             self.last_refresh_u2_time = time.time()
             return (1280, 720)
+        from core.device.uiautomator2_client import U2Client
         self.u2_client = U2Client.get_instance(self.serial)
         self.u2 = self.u2_client.get_connection()
         self.check_atx()
@@ -1192,6 +1193,7 @@ if __name__ == '__main__':
         "D:\\github\\bass\\blue_archive_auto_script\\src\\atx_app\\atx-agent_0.10.1_linux_386\\atx-agent"))
     # "D:\\github\\bass\\blue_archive_auto_script\\src\\atx_app\\atx-agent_0.10.0_linux_386\\atx-agent"
     import uiautomator2
+    from core.device.uiautomator2_client import BAAS_U2_Initer
 
     u2 = uiautomator2.connect("127.0.0.1:16512")
     from core.utils import Logger

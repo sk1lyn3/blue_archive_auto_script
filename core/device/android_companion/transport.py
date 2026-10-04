@@ -20,7 +20,9 @@ SOCKET_NAME = "baas-companion-v1"
 
 
 class MiddlewareError(RuntimeError):
-    pass
+    def __init__(self, message, *, reply=None):
+        super().__init__(message)
+        self.reply = reply or {}
 
 
 class MiddlewareClient:
@@ -141,7 +143,7 @@ class MiddlewareClient:
                 self._disconnect_socket()
                 raise
             if not reply.get("ok"):
-                raise MiddlewareError(str(reply.get("error", reply)))
+                raise MiddlewareError(str(reply.get("error", reply)), reply=reply)
             return reply, payload
 
     def command(self, cmd: str, **extras: Any) -> dict[str, Any]:
