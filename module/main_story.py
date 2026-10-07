@@ -304,7 +304,7 @@ def push_episode(self, num):
     while episode_status != "ALL_CLEAR":
         res = to_select_episode(self, episode_status, skip_first_screenshot=True)
         while res == "main_story_plot-index":
-            possible_pos = [[758, 257], [698, 362]] if self.server == "CN" else [[728, 257], [668, 362]]
+            possible_pos = [[728, 257], [668, 362]]
             for pos in possible_pos:
                 if check_current_plot_status(self, pos) == "UNCLEAR":
                     to_episode_info(self, pos, True)
