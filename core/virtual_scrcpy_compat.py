@@ -7,6 +7,7 @@ When upstream changes a patched method, the wrap still calls the original — co
 are isolated to this file only.
 """
 import time
+from core.device.backend_compat import get_backend_compat
 
 
 def apply():
@@ -80,8 +81,9 @@ def _patch_color():
 
     def _rgb_in_range(self, x, y, r_min, r_max, g_min, g_max, b_min, b_max,
                       check_nearby=False, nearby_range=1):
-        if getattr(getattr(self, 'config', None), 'screenshot_method', '') in ('virtual_scrcpy', 'android_companion'):
-            tol = 15
+        method = getattr(getattr(self, 'config', None), 'screenshot_method', '')
+        tol = get_backend_compat(method).rgb_tolerance
+        if tol:
             r_min = max(0, r_min - tol); r_max = min(255, r_max + tol)
             g_min = max(0, g_min - tol); g_max = min(255, g_max + tol)
             b_min = max(0, b_min - tol); b_max = min(255, b_max + tol)

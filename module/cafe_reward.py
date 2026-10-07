@@ -7,6 +7,7 @@ import numpy as np
 
 from core import image, color, picture
 from core.utils import merge_nearby_coordinates
+from core.device.backend_compat import get_backend_compat
 from statistics import median
 
 
@@ -120,8 +121,9 @@ def gift_to_cafe(self):
 def zoom_out(self):
     if self.is_android_device:
         self.pinch(640, 360, 300, 50, steps=30)
-        if self.config.screenshot_method in ('virtual_scrcpy', 'android_companion'):
-            time.sleep(0.2)
+        delay = get_backend_compat(self.config.screenshot_method).cafe_zoom_delay
+        if delay:
+            time.sleep(delay)
     else:
         for _ in range(0, 15):
             self.control.scroll(640, 360, 10)
@@ -136,8 +138,7 @@ def swipe_gift_thread(self, duration, ret_queue):
 def swipe_gift_and_screenshot(self):
     shotDelay = self.config.cafe_reward_interaction_shot_delay
     if self.is_android_device:
-        if self.config.screenshot_method in ('virtual_scrcpy', 'android_companion'):
-            shotDelay = max(shotDelay, 0.6)
+        shotDelay = max(shotDelay, get_backend_compat(self.config.screenshot_method).cafe_gift_shot_delay)
         t1 = threading.Thread(target=screenshot_thread, args=(self, shotDelay))
         t1.start()
         start_t = time.time()
@@ -155,7 +156,7 @@ def swipe_gift_and_screenshot(self):
 def find_student_position(self):
     swipe_t = swipe_gift_and_screenshot(self)
     img = cv2.resize(self.latest_img_array, (1280, 720), interpolation=cv2.INTER_AREA)
-    threshold = 0.55 if self.config.screenshot_method == 'virtual_scrcpy' else 0.75
+    threshold = get_backend_compat(self.config.screenshot_method).cafe_student_threshold
     res = match(img, threshold)
     if not res:
         self.logger.info("No interaction found")
