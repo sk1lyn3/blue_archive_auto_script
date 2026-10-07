@@ -98,6 +98,18 @@ def generic_activity_tab_selected(self, region, optional=False):
 def generic_activity_reset_scroll_position(self, region):
     if region is None:
         return
+    bounce_candidates = {
+        "story": ["mission", "challenge"],
+        "mission": ["story", "challenge"],
+        "challenge": ["mission", "story"],
+    }
+    for candidate in bounce_candidates.get(region, []):
+        if not generic_activity_tab_selected(self, candidate, optional=True):
+            continue
+        if not generic_activity_tab_selected(self, region):
+            raise FunctionCallTimeout(f"Activity tab [ {region} ] not restored after scroll reset.")
+        self.logger.info(f"Generic activity tab [ {region} ] scroll reset by switching tabs.")
+        return
     self.logger.info(f"Generic activity tab [ {region} ] scroll reset by pull down.")
     self.swipe(919, 155, 943, 720, duration=0.05, post_sleep_time=1)
     self.update_screenshot_array()
@@ -423,7 +435,7 @@ def explore_activity_story(self):
             return True
         start_story(self)
         to_activity(self, "mission", True)
-        to_activity(self, "story", True, reset_scroll=getattr(self, "activity_use_generic_entry", False))
+        to_activity(self, "story", True)
 
 
 def to_challenge_task_info(self, number):
@@ -482,7 +494,7 @@ def explore_activity_challenge(self):
         if self.config.manual_boss:
             self.click(1235, 41)
         to_activity(self, "mission", True)
-        to_activity(self, "challenge", True, reset_scroll=getattr(self, "activity_use_generic_entry", False))
+        to_activity(self, "challenge", True)
 
 
 def start_mission(self, attribute_str: str):
