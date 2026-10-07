@@ -29,6 +29,8 @@ def enter_task_map_for_generic_entry(self):
     deadline = time.time() + 8
     while self.flag_run and time.time() < deadline:
         self.update_screenshot_array()
+        if compare_image(self, "main_page_bus"):
+            return True
         if color.match_rgb_feature(self, "loadingNotWhite") and color.match_rgb_feature(self, "loadingWhite"):
             color.wait_loading(self)
             return True
