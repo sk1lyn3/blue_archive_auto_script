@@ -1,10 +1,7 @@
 import json
 import os
 
-import cv2
-
 from core import color, picture, image
-from core.exception import FunctionCallTimeout
 from module.explore_tasks.task_utils import execute_grid_task
 
 
@@ -235,27 +232,6 @@ def check_current_plot_status(self, position):
         return "UNCLEAR"
 
 
-def find_uncleared_plot(self, position):
-    if check_current_plot_status(self, position) == "UNCLEAR":
-        return position
-    x, y = position
-    area = (x - 40, y - 20, x + 41, y + 21)
-    crop = image.resize_ss_image(self, area)
-    # Locate the grey unread book; ignore small text marks and large backgrounds.
-    mask = cv2.inRange(crop, (200, 200, 197), (210, 210, 207))
-    count, _, stats, centers = cv2.connectedComponentsWithStats(mask)
-    candidates = []
-    for index in range(1, count):
-        _, _, width, height, pixels = stats[index]
-        if 12 <= width <= 32 and 18 <= height <= 34 and pixels >= 120:
-            cx, cy = centers[index]
-            candidates.append((round(area[0] + cx), round(area[1] + cy)))
-    for candidate in sorted(candidates, key=lambda p: abs(p[0] - x) + abs(p[1] - y)):
-        if check_current_plot_status(self, candidate) == "UNCLEAR":
-            return candidate
-    return None
-
-
 def clear_current_plot(self, skip_first_screenshot=False):
     rgb_possibles = {
         'reward_acquired': (640, 100),
@@ -327,20 +303,14 @@ def push_episode(self, num):
     episode_status = check_episode(self)
     while episode_status != "ALL_CLEAR":
         res = to_select_episode(self, episode_status, skip_first_screenshot=True)
-        missed_entries = 0
         while res == "main_story_plot-index":
             possible_pos = [[728, 257], [668, 362]]
             for pos in possible_pos:
-                entry_pos = find_uncleared_plot(self, pos)
-                if entry_pos is not None:
-                    missed_entries = 0
-                    to_episode_info(self, entry_pos, True)
+                if check_current_plot_status(self, pos) == "UNCLEAR":
+                    to_episode_info(self, pos, True)
                     res = clear_current_plot(self, True)
                     break
             else:
-                missed_entries += 1
-                if missed_entries >= 10:
-                    raise FunctionCallTimeout("No unread entry found in the main-story directory after 10 checks.")
                 res = to_select_episode(self, episode_status, False)
         if not is_final:
             to_main_story(self, True, "episode")
