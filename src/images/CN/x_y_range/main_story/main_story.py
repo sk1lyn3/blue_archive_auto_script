@@ -4,6 +4,7 @@ x_y_range = {
     'select-episode': (107, 9, 162, 36),
     'episode-info': (577, 145, 640, 174),
     'episode-cleared-feature': (698, 143, 878, 173),
+    'get-new-search-data': (397, 403, 871, 436),
     "enter-main-story": (373, 500, 550, 553),
     "episode1": (983, 248, 1268, 278),
     "episode2": (983, 248, 1268, 278),
