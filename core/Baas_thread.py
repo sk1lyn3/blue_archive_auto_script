@@ -819,31 +819,28 @@ class Baas_thread:
                 'JP': (502, 13, 612, 33)
             }
             region = region[self.server]
-        ocr_res = self.ocr.get_region_res(
-            self,
-            region,
-            "en-us",
-            "AP",
-            "0123456789/"
-        )
-        _max = -1
-        if '/' in ocr_res:
-            ocr_res = ocr_res.split('/')
-            _max = ocr_res[1]
-            ocr_res = ocr_res[0]
-        try:
-            ocr_res = int(ocr_res)
-            _max = int(_max)
-            if ocr_res <= 999 and _max <= 999:
-                data = {
-                    "count": ocr_res,
-                    "max": _max,
-                    "time": time.time()
-                }
-                self.config_set.set("ap", data)
-                return ocr_res
-        except ValueError:
-            pass
+        previous_max = self.config_set.config.ap.get("max", -1)
+        for attempt in range(2):
+            ocr_res = self.ocr.get_region_res(
+                self, region, "en-us", "AP", "0123456789/"
+            )
+            try:
+                count, maximum = (int(value) for value in ocr_res.split('/'))
+                # AP can overflow its cap, but the cap starts at 24 and never
+                # decreases for the same account. Do not save truncated readings.
+                if (0 <= count <= 999 and 24 <= maximum <= 999
+                        and maximum >= previous_max):
+                    self.config_set.set("ap", {
+                        "count": count, "max": maximum, "time": time.time()
+                    })
+                    return count
+            except ValueError:
+                pass
+            if attempt == 0:
+                self.logger.warning(f"Suspicious AP reading: {ocr_res!r}; retrying once.")
+                self.update_screenshot_array()
+                # Leave extra room for the last digits on the retry crop.
+                region = (region[0], region[1], region[2] + 16, region[3])
 
         self.logger.warning("Failed to get AP.")
         return 999
