@@ -882,7 +882,7 @@ class Baas_thread:
     def get_creditpoints(self, is_main_page=False):
         if is_main_page:
             region = {
-                'CN': (699, 20, 832, 52),
+                'CN': (671, 20, 832, 52),
                 'Global': (671, 20, 819, 52),
                 'JP': (700, 26, 847, 44)
             }
