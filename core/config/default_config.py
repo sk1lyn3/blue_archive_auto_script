@@ -354,8 +354,8 @@ DEFAULT_CONFIG = """
     "createPriority_phase2": "",
     "createPriority_phase3": "",
     "create_phase_1_select_item_rule": "default",
-    "create_phase_2_select_item_rule": "default",
-    "create_phase_3_select_item_rule": "default",
+    "create_phase_2_select_item_rule": "primary",
+    "create_phase_3_select_item_rule": "advanced",
     "create_phase": 1,
     "create_item_holding_quantity": {
 
