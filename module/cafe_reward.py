@@ -214,7 +214,7 @@ def interaction_for_cafe_solve_method3(self):
             continue
         self.logger.info("Find " + str(len(res)) + " interactions")
         for j in range(0, len(res)):
-            self.click(res[j][0], min(res[j][1], 591), wait_over=True, duration=0.4)
+            self.click(res[j][0], min(res[j][1], 591), wait_over=True, duration=0.3)
         if i != max_times - 1:
             time.sleep(2)
             to_cafe(self)
