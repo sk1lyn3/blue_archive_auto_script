@@ -365,7 +365,7 @@ DEFAULT_CONFIG = """
     "last_refresh_config_time": "0",
     "alreadyCreateTime": "0",
     "totalForceFightDifficulty": "NORMAL",
-    "hardPriority": "1-1-1",
+    "hardPriority": "1-1-1,2-1-max",
     "unfinished_hard_tasks": [],
     "mainlinePriority": "5-1-1",
     "unfinished_normal_tasks": [],
@@ -451,8 +451,8 @@ DEFAULT_CONFIG = """
         ["Unused","Unused","Unused","Unused","Unused"],
         ["Unused","Unused","Unused","Unused","Unused"]
     ],
-    "activity_sweep_task_number": 1,
-    "activity_sweep_times": "0",
+    "activity_sweep_task_number": "10,11,12",
+    "activity_sweep_times": "1,1,1",
     "TacticalChallengeShopRefreshTime": "0",
     "TacticalChallengeShopList": [
         0,
