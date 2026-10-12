@@ -588,8 +588,8 @@ class CreateItemCheckState:
         self.select_item_func_list = {
             "default": [
                 self.phase1_default_select_item,
-                None,
-                None
+                (self.select_levels, "primary"),
+                (self.select_levels, "advanced")
             ],
             "primary": [
                 None,
