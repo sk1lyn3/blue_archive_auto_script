@@ -70,6 +70,7 @@ def generic_activity_tab_selected(self, region, optional=False):
         "challenge": ["activity_challenge-not-chosen-0", "activity_challenge-not-chosen-1"],
     }
 
+    clicked = False
     deadline = time.time() + (20 if optional else 60)
     while self.flag_run and time.time() < deadline:
         for feature_name in selected_features[region]:
@@ -84,11 +85,17 @@ def generic_activity_tab_selected(self, region, optional=False):
             x = upper_left[0] + template.shape[1] // 2
             y = upper_left[1] + template.shape[0] // 2
             self.logger.info(f"Generic activity tab [ {region} ] -> Click @ ({x},{y})")
-            self.click(x, y)
+            self.click(x, y, wait_over=True)
+            clicked = True
             time.sleep(self.screenshot_interval)
             self.update_screenshot_array()
             break
         else:
+            if clicked:
+                # A clicked tab may temporarily disappear during its transition.
+                time.sleep(self.screenshot_interval)
+                self.update_screenshot_array()
+                continue
             if optional:
                 self.logger.info(f"Optional generic activity tab [ {region} ] not found, skip.")
                 return False
@@ -112,6 +119,8 @@ def generic_activity_reset_scroll_position(self, region):
             raise FunctionCallTimeout(f"Activity tab [ {region} ] not restored after scroll reset.")
         self.logger.info(f"Generic activity tab [ {region} ] scroll reset by switching tabs.")
         return
+    if not generic_activity_tab_selected(self, region):
+        raise FunctionCallTimeout(f"Activity tab [ {region} ] not restored before pull-down reset.")
     self.logger.info(f"Generic activity tab [ {region} ] scroll reset by pull down.")
     self.swipe(919, 155, 943, 720, duration=0.05, post_sleep_time=1)
     self.update_screenshot_array()
