@@ -2,13 +2,18 @@ import importlib
 
 
 def implement(self):
-    if getattr(self, "activity_use_generic_entry", False):
+    if getattr(self, "activity_use_generic_entry", False) or self.config.activity_sweep_use_generic_entry:
         if self.current_game_activity is not None:
             self.logger.info("Current activity: " + self.current_game_activity)
         else:
             self.logger.warning("Current activity is not supported, use generic activity flow")
         from module.activities.activity_utils import activity_sweep
-        return activity_sweep(self)
+        previous = getattr(self, "activity_use_generic_entry", False)
+        self.activity_use_generic_entry = True
+        try:
+            return activity_sweep(self)
+        finally:
+            self.activity_use_generic_entry = previous
     if self.current_game_activity is None:
         self.logger.warning("Current activity is not supported")
         return True

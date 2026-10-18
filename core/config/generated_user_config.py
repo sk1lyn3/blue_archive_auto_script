@@ -90,6 +90,7 @@ class Config:
     preset_team_attribute: list
     activity_sweep_task_number: int
     activity_sweep_times: str
+    activity_sweep_use_generic_entry: bool
     TacticalChallengeShopRefreshTime: str
     TacticalChallengeShopList: list
     CommonShopRefreshTime: str

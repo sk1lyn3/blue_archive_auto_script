@@ -453,6 +453,7 @@ DEFAULT_CONFIG = """
     ],
     "activity_sweep_task_number": "10,11,12",
     "activity_sweep_times": "1,1,1",
+    "activity_sweep_use_generic_entry": false,
     "TacticalChallengeShopRefreshTime": "0",
     "TacticalChallengeShopList": [
         0,
