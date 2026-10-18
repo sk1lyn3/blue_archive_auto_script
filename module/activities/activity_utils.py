@@ -181,6 +181,7 @@ def to_activity(self, region=None, skip_first_screenshot=False, optional=False, 
         'normal_task_reward-acquired-confirm': (800, 660),
         "activity_exchange-confirm": (673, 603),
     }
+    img_possibles.update(picture.GAME_ONE_TIME_POP_UPS[self.server])
     img_ends = "activity_menu"
     detect_kwargs = {
         "skip_first_screenshot": skip_first_screenshot,
