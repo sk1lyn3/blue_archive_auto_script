@@ -32,8 +32,10 @@ class Config:
     totalForceFightDifficulty: str
     hardPriority: str
     unfinished_hard_tasks: list
+    unfinished_hard_tasks_source: str
     mainlinePriority: str
     unfinished_normal_tasks: list
+    unfinished_normal_tasks_source: str
     main_story_regions: str
     rewarded_task_times: str
     purchase_rewarded_task_ticket_times: str

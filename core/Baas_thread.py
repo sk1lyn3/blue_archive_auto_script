@@ -983,30 +983,31 @@ class Baas_thread:
         self.config_set.config.alreadyCreateTime = 0
 
     def refresh_common_tasks(self):
-        from module.explore_tasks.sweep_task import read_task
-        temp = self.config.mainlinePriority
-        self.config.unfinished_normal_tasks = []
-        if type(temp) is str:
-            temp = temp.split(',')
-        for i in range(0, len(temp)):
-            try:
-                self.config.unfinished_normal_tasks.append(read_task(temp[i], True))
-            except Exception as e:
-                self.logger.error(e.__str__())
-        self.config_set.set("unfinished_normal_tasks", self.config.unfinished_normal_tasks)
+        self.refresh_sweep_tasks("mainlinePriority", "unfinished_normal_tasks", True)
 
     def refresh_hard_tasks(self):
+        self.refresh_sweep_tasks("hardPriority", "unfinished_hard_tasks", False)
+
+    def refresh_sweep_tasks(self, setting, task_list, is_normal):
         from module.explore_tasks.sweep_task import read_task
-        self.config.unfinished_hard_tasks = []
-        temp = self.config.hardPriority
-        if type(temp) is str:
-            temp = temp.split(',')
-        for i in range(0, len(temp)):
+        source = getattr(self.config, setting)
+        tasks = []
+        for task in (source.split(',') if type(source) is str else source):
+            if not task:
+                continue
             try:
-                self.config.unfinished_hard_tasks.append(read_task(temp[i], False))
+                tasks.append(read_task(task, is_normal))
             except Exception as e:
                 self.logger.error(e.__str__())
-        self.config_set.set("unfinished_hard_tasks", self.config.unfinished_hard_tasks)
+        setattr(self.config, task_list, tasks)
+        setattr(self.config, task_list + "_source", source)
+        self.config_set.set(task_list, tasks)
+        self.config_set.set(task_list + "_source", source)
+
+    def sync_sweep_tasks(self, setting, task_list, is_normal):
+        source = getattr(self.config, setting)
+        if getattr(self.config, task_list + "_source") != source or (not source and getattr(self.config, task_list)):
+            self.refresh_sweep_tasks(setting, task_list, is_normal)
 
     def handle_then(self):
         action = self.config_set.config.then

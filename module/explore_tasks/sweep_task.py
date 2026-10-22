@@ -32,6 +32,7 @@ def print_task_list(self: Baas_thread, tasklist: list[list], title: str, isNorma
 def sweep_hard_task(self: Baas_thread):
     self.to_main_page(skip_first_screenshot=True)
     current_ap = self.get_ap(True)
+    self.sync_sweep_tasks("hardPriority", "unfinished_hard_tasks", False)
     tasklist = deepcopy(self.config.unfinished_hard_tasks)
     base_ap = 20
     print_task_list(self, tasklist, "Sweeping HARD task list", False)
@@ -82,6 +83,7 @@ def sweep_hard_task(self: Baas_thread):
 def sweep_normal_task(self: Baas_thread):
     self.to_main_page(skip_first_screenshot=True)
     current_ap = self.get_ap(True)
+    self.sync_sweep_tasks("mainlinePriority", "unfinished_normal_tasks", True)
     tasklist = deepcopy(self.config.unfinished_normal_tasks)
     print_task_list(self, tasklist, "Sweeping NORMAL task list", True)
     for i in range(len(tasklist)):
