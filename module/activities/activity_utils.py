@@ -35,6 +35,13 @@ def tab_click(self, feature_name, fallback):
     return fallback
 
 
+def generic_activity_quest_only(self, tab_area, tab_features):
+    # Some events show a single quest list without any tabs.
+    if any(search_in_area(self, name, tab_area, threshold=0.8) for name in tab_features):
+        return False
+    return bool(search_in_area(self, "activity_mission-enter-task-button", (1060, 143, 1195, 686), threshold=0.8))
+
+
 def generic_activity_tab_selected(self, region, optional=False):
     tab_area = (650, 70, 1225, 150)
     selected_features = {
@@ -52,14 +59,19 @@ def generic_activity_tab_selected(self, region, optional=False):
     started = time.monotonic()
     deadline = started + (20 if optional else 60)
     while self.flag_run and time.monotonic() < deadline:
+        if getattr(self, "_generic_activity_quest_only", False):
+            if search_in_area(self, "activity_mission-enter-task-button", (1060, 143, 1195, 686), threshold=0.8):
+                return region == "mission"
         for feature_name in selected_features[region]:
             if search_in_area(self, feature_name, tab_area, threshold=0.8):
+                self._generic_activity_quest_only = False
                 self.logger.info(f"Generic activity tab [ {region} ] selected.")
                 return True
         for feature_name in not_chosen_features[region]:
             upper_left = search_in_area(self, feature_name, tab_area, threshold=0.8)
             if not upper_left:
                 continue
+            self._generic_activity_quest_only = False
             template = position.image_dic[self.identifier][feature_name]
             x = upper_left[0] + template.shape[1] // 2
             y = upper_left[1] + template.shape[0] // 2
@@ -70,9 +82,16 @@ def generic_activity_tab_selected(self, region, optional=False):
             self.update_screenshot_array()
             break
         else:
-            if optional and not clicked and time.monotonic() - started >= 3:
-                self.logger.info(f"Optional generic activity tab [ {region} ] not found, skip.")
-                return False
+            if not clicked and time.monotonic() - started >= 3:
+                tab_features = [name for features in (selected_features, not_chosen_features)
+                                for names in features.values() for name in names]
+                if generic_activity_quest_only(self, tab_area, tab_features):
+                    self._generic_activity_quest_only = True
+                    self.logger.info(f"Generic activity has no tabs, {'use quest list' if region == 'mission' else 'skip'} [ {region} ].")
+                    return region == "mission"
+                if optional:
+                    self.logger.info(f"Optional generic activity tab [ {region} ] not found, skip.")
+                    return False
             # Both the activity menu and a clicked tab can fade in after the first frame.
             time.sleep(self.screenshot_interval)
             self.update_screenshot_array()
@@ -91,7 +110,8 @@ def generic_activity_reset_scroll_position(self, region):
         "mission": ["story", "challenge"],
         "challenge": ["mission", "story"],
     }
-    for candidate in bounce_candidates.get(region, []):
+    candidates = [] if getattr(self, "_generic_activity_quest_only", False) else bounce_candidates.get(region, [])
+    for candidate in candidates:
         if not generic_activity_tab_selected(self, candidate, optional=True):
             continue
         if not generic_activity_tab_selected(self, region):
@@ -113,6 +133,8 @@ def generic_activity_start_at_menu(self):
 
 
 def prepare_activity_menu_entry(self):
+    # Re-detect the layout for each activity task, including task retries.
+    self._generic_activity_quest_only = False
     if generic_activity_start_at_menu(self):
         self.logger.info("Generic activity entry: use current activity menu.")
         return
@@ -229,6 +251,7 @@ def to_activity(self, region=None, skip_first_screenshot=False, optional=False, 
 
 # sweep
 def activity_sweep(self):
+    self._generic_activity_quest_only = False
     times = preprocess_activity_sweep_times(self.config.activity_sweep_times)
     number = preprocess_activity_region(self.config.activity_sweep_task_number)
     self.logger.info("activity sweep task number : " + str(number))
