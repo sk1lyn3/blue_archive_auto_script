@@ -1,4 +1,6 @@
 import json
+
+from core.atomic_io import write_json
 import threading
 import time
 from datetime import datetime, timedelta, timezone
@@ -38,8 +40,7 @@ class Scheduler:
                         self.event_map[item['func_name']] = item['event_name']
 
     def _commit_change(self):
-        with open(self.event_config_path, 'w', encoding='utf-8') as f:
-            json.dump(self._event_config, f, ensure_ascii=False, indent=2)
+        write_json(self.event_config_path, self._event_config, indent=2)
 
     @classmethod
     def get_next_time(cls, hour, minute, second):
