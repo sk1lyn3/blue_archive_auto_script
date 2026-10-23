@@ -91,6 +91,7 @@ class Scheduler:
             self._current_task = self._valid_task_queue[0]
             self._currentTaskDisplay = self.event_map[self._current_task['current_task']]
             self._valid_task_queue.pop(0)
+            self._waitingTaskDisplayQueue.pop(0)
             if self.update_signal is not None:
                 self.update_signal.emit([self._currentTaskDisplay, *self._waitingTaskDisplayQueue])
             return self._current_task
@@ -119,6 +120,7 @@ class Scheduler:
         _valid_event = sorted(_valid_event, key=lambda x: x['priority'])  # sort by priority
 
         self._valid_task_queue = []
+        self._waitingTaskDisplayQueue = []
         for i in range(0, len(_valid_event)):
             self._waitingTaskDisplayQueue.append(_valid_event[i]['event_name'])
             thisTask = {
@@ -150,7 +152,10 @@ class Scheduler:
         for period in disabled:
             start = Scheduler.convert_to_seconds(*period[0])
             end = Scheduler.convert_to_seconds(*period[1])
-            if start <= time_since_midnight <= end:
+            if start > end:
+                if time_since_midnight >= start or time_since_midnight <= end:
+                    return True
+            elif start <= time_since_midnight <= end:
                 return True
         return False
 
