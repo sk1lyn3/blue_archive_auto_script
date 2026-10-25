@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from core import color, image
 from core.color import match_rgb_feature
 from core.exception import RequestHumanTakeOver, FunctionCallTimeout, PackageIncorrect
+from core.global_news import find_close_button
 from module.main_story import set_acc_and_auto
 
 if TYPE_CHECKING:
@@ -65,6 +66,9 @@ def co_detect(
     start_time = time.time()
     feature_last_appear_time = start_time
     last_check_pkg_time = start_time
+    check_global_news = self.server == "Global" and any(
+        reactions and "main_page_news" in reactions
+        for reactions in (img_reactions, pop_ups_img_reactions))
 
     # Convert single RGB or image features to lists
     if type(rgb_ends) is not list:
@@ -95,6 +99,19 @@ def co_detect(
 
         # loading check
         color.wait_loading(self)
+
+        # News may arrive after the main page was recognized; handle it before navigation.
+        if check_global_news:
+            position = find_close_button(self.latest_img_array, self.ratio)
+            if position is not None:
+                feature_last_appear_time = current_time
+                if current_time - self.last_click_time > 2 or self.last_click_name != "main_page_news":
+                    self.logger.info(f"Global news popup -> Click @ ({position[0]},{position[1]})")
+                    self.click(*position)
+                    self.last_click_time = time.time()
+                    self.last_click_name = "main_page_news"
+                    self.last_click_position = position
+                continue
 
         # exit the stage if any end feature is matched
         for rgb_feature in rgb_ends:

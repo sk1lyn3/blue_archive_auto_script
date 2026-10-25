@@ -20,6 +20,7 @@ from core.config.config_set import ConfigSet
 from core.device import emulator_manager
 from core.device.emulator_manager import process_api
 from core.exception import RequestHumanTakeOver, FunctionCallTimeout, PackageIncorrect, LogTraceback
+from core.global_news import find_close_button
 from core.notification import notify, toast
 from core.pushkit import push
 from core.scheduler import Scheduler
@@ -713,37 +714,17 @@ class Baas_thread:
             self.global_delayed_news_attempts += 1
             time.sleep(0.75)
             self.update_screenshot_array()
-            if not self.global_news_close_button_visible():
+            position = find_close_button(self.latest_img_array, self.ratio)
+            if position is None:
                 continue
             self.global_delayed_news_checked = True
-            x, y = 1213, 42
+            x, y = position
             self.logger.info(
                 f"Delayed Global news close attempt {self.global_delayed_news_attempts} -> Click @ ({x},{y})"
             )
             self.click(x, y)
             return True
         return False
-
-    def global_news_close_button_visible(self):
-        if self.latest_img_array is None:
-            return False
-        img = self.latest_img_array
-        ratio = self.ratio
-        y1, y2 = int(20 * ratio), int(70 * ratio)
-        x1, x2 = int(1190 * ratio), int(1245 * ratio)
-        if y2 > img.shape[0] or x2 > img.shape[1]:
-            return False
-        close_area = img[y1:y2, x1:x2]
-        if close_area.size == 0 or float(np.mean(close_area)) >= 95:
-            return False
-        x_marks = [(1206, 31), (1216, 42), (1227, 54), (1227, 31), (1222, 36), (1211, 49)]
-        for x, y in x_marks:
-            sx, sy = int(x * ratio), int(y * ratio)
-            if sy >= img.shape[0] or sx >= img.shape[1]:
-                return False
-            if float(np.mean(img[sy, sx])) < 125:
-                return False
-        return True
 
     def init_image_resource(self):
         return position.init_image_data(self)
