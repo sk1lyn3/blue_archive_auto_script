@@ -1,4 +1,5 @@
 import time
+import cv2
 import numpy as np
 
 from core import picture
@@ -135,9 +136,23 @@ def to_refresh(self):
 
 
 def get_tactical_challenge_assets(self):
+    region = (751, 68, 884, 98)
+    crop = self.ocr.get_area_img(self.latest_img_array, region, self.ratio)
+    if crop.size:
+        # Trim blank columns around the dark digits, keeping the original pixels.
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        columns = np.flatnonzero(
+            np.count_nonzero(gray < 128, axis=0) >= max(1, round(2 * self.ratio))
+        )
+        if columns.size:
+            padding = max(1, round(6 * self.ratio))
+            left = max(0, int(columns[0]) - padding)
+            right = min(crop.shape[1], int(columns[-1]) + padding + 1)
+            region = (region[0] + left / self.ratio, region[1],
+                      region[0] + right / self.ratio, region[3])
     ret = self.ocr.recognize_int(
         baas=self,
-        region=(751, 68, 884, 98),
+        region=region,
         log_info="Tactical Challenge Assets"
     )
     data = {
