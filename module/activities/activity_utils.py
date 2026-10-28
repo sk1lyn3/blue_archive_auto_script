@@ -274,7 +274,7 @@ def activity_sweep(self):
         duration = 1
         if sweep_times > 50:
             sweep_times = int(ap / sweep_one_time_ap[number[i]])
-            click_times = int(sweep_times / 2) + 1
+            click_times = sweep_times - 1
             duration = 0.3
         if sweep_times <= 0:
             self.logger.warning("inadequate ap")
