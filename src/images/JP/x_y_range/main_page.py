@@ -10,6 +10,7 @@ x_y_range = {
     'news': (250, 85, 328, 117),
     'back-arrow': (37, 20, 80, 57),
     'download-additional-resources': (474, 100, 808, 143),
+    'download-additional-resources2': (360, 243, 930, 295),
     'full-notice': (400, 280, 880, 390),
     'net-work-unstable': (405, 269, 875, 337),
     'draw-card-point-exchange-to-stone-piece-notice': (378, 220, 892, 291),

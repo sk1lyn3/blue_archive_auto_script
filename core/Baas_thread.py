@@ -691,6 +691,7 @@ class Baas_thread:
                 'main_page_news': (1142, 104),
                 'main_page_attendance-reward': (642, 489),
                 'main_page_download-additional-resources': (769, 535),
+                'main_page_download-additional-resources2': (769, 535),
             },
             'Global': {
                 'main_page_news': (1239, 50),
