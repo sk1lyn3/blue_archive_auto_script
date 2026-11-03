@@ -232,7 +232,12 @@ def deal_with_pop_ups(self, pop_ups_rgb_reactions: dict = None, pop_ups_img_reac
     if pop_ups_img_reactions is not None:
         common_task_img_reactions.update(pop_ups_img_reactions)
     for rgb_feature, click in common_task_img_reactions.items():
-        if image.compare_image(self, rgb_feature):
+        matched = image.compare_image(self, rgb_feature)
+        if not matched and rgb_feature == "main_page_login-network-error-message":
+            # The CN login dialog text can shift slightly between game versions.
+            matched = image.search_in_area(
+                self, rgb_feature, area=(493, 307, 770, 361)) is not False
+        if matched:
             self.logger.info("find " + rgb_feature)
             if rgb_feature == "activity_choose-buff":
                 choose_buff(self)
