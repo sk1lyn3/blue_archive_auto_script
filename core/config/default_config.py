@@ -3563,7 +3563,7 @@ STATIC_DEFAULT_CONFIG = '''
     },
     "current_game_activity": {
         "CN": "WeAretheOccultResearchSociety",
-        "Global": "HighlanderRailroadExplosionIncident",
+        "Global": "ChairMakotosLuxSummerGetaway",
         "JP": "HighlanderRailroadExplosionIncident"
     },
     "dailyGameActivity": {
