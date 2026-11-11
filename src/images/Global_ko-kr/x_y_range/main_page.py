@@ -26,13 +26,16 @@ x_y_range = {
     # "request-failed-notice": (440, 300, 850, 370),
     # "Failed-to-convert-errorResponse": (419, 320, 862, 357),
 
-    'purchase-pyroxenes-menu': (565, 97, 717, 128),
+    'purchase-pyroxenes-menu': (106, 10, 250, 38),
+    'purchase-pyroxenes-general-not-selected': (41, 304, 185, 331),
+    'purchase-pyroxenes-general-selected-2': (41, 304, 185, 331),
+    'purchase-pyroxenes-daily-selected': (854, 90, 924, 109),
     'purchase-pyroxenes-limited-selected': (337, 167, 429, 195),
     'purchase-pyroxenes-pyroxenes-selected-1': (600, 167, 677, 195),
     'purchase-pyroxenes-pyroxenes-selected-2': (408, 167, 482, 195),
     'purchase-pyroxenes-package-selected-1': (841, 167, 954, 195),
     'purchase-pyroxenes-package-selected-2': (776, 167, 888, 195),
-    'purchase-pyroxenes-daily-free-purchasable': (323, 457, 444, 518),
-    'purchase-pyroxenes-daily-free-non-purchasable': (353, 457, 414, 518),
-    'purchase-pyroxenes-confirm-purchase-notice': (565, 70, 717, 125)
+    'purchase-pyroxenes-daily-free-purchasable': (304, 314, 452, 331),
+    'purchase-pyroxenes-daily-free-non-purchasable': (304, 314, 452, 331),
+    'purchase-pyroxenes-confirm-purchase-notice': (584, 70, 704, 100)
 }

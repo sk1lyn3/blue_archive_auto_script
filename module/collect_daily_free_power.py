@@ -1,11 +1,17 @@
-from core import picture
+import time
+
+from core import picture, position
+from core.exception import FunctionCallTimeout, RequestHumanTakeOver
+from core.image import compare_image, search_in_area
 from core.picture import GAME_ONE_TIME_POP_UPS
 
 
 def implement(self):
     self.to_main_page()
     to_purchase_pyroxenes_menu(self)
-    if self.server == "JP":
+    if self.server == "Global":
+        to_global_daily_free_product(self)
+    elif self.server == "JP":
         to_jp_daily_free_product(self)
     else:
         to_purchase_type(self, "package")
@@ -20,7 +26,7 @@ def implement(self):
 def collect_daily_free_power(self):
     self.logger.info("Collect Daily Free Power.")
 
-    free_package_position = (385, 423) if self.server == "JP" else (385, 479)
+    free_package_position = (385, 423) if self.server in ("JP", "Global") else (385, 479)
     img_possibles = {
         "main_page_purchase-pyroxenes-menu": free_package_position,
         "main_page_purchase-pyroxenes-confirm-purchase-notice": (749, 571),
@@ -31,7 +37,7 @@ def collect_daily_free_power(self):
     self.logger.info("Get 10 AP")
 
 def return_to_main_page(self):
-    back_position = (52, 38) if self.server == "JP" else (1011, 114)
+    back_position = (52, 38) if self.server in ("JP", "Global") else (1011, 114)
     img_possibles = {
         "main_page_purchase-pyroxenes-menu": back_position,
         "main_page_full-notice": (887, 165)
@@ -73,6 +79,35 @@ def to_jp_daily_free_product(self):
         {feature: (885, 100) for feature in general_selected},
         skip_first_screenshot=True,
     )
+
+
+def to_global_daily_free_product(self):
+    # Optional shop categories can move General up or down in the sidebar.
+    area = (35, 230, 190, 340)
+    selected = "main_page_purchase-pyroxenes-general-selected-2"
+    unselected = "main_page_purchase-pyroxenes-general-not-selected"
+    deadline = time.monotonic() + 60
+    next_click = 0
+    while self.flag_run:
+        if time.monotonic() >= deadline:
+            raise FunctionCallTimeout("Daily Free Power: General/Daily tab not selected.")
+        self.update_screenshot_array()
+        target = None
+        if search_in_area(self, selected, area):
+            if compare_image(self, "main_page_purchase-pyroxenes-daily-selected"):
+                return
+            target = (885, 100)
+        else:
+            point = search_in_area(self, unselected, area)
+            if point:
+                height, width = position.image_dic[self.identifier][unselected].shape[:2]
+                target = (point[0] + width // 2, point[1] + height // 2)
+        if target and time.monotonic() >= next_click:
+            self.click(*target, wait_over=True)
+            next_click = time.monotonic() + 2
+        time.sleep(self.screenshot_interval)
+    raise RequestHumanTakeOver("Daily Free Power navigation stopped.")
+
 
 def to_purchase_type(self, tp):
     # position when " limited " exist
