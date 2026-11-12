@@ -91,7 +91,8 @@ class Scheduler:
             self._current_task = self._valid_task_queue[0]
             self._currentTaskDisplay = self.event_map[self._current_task['current_task']]
             self._valid_task_queue.pop(0)
-            self._waitingTaskDisplayQueue.pop(0)
+            if self._waitingTaskDisplayQueue:
+                self._waitingTaskDisplayQueue.pop(0)
             if self.update_signal is not None:
                 self.update_signal.emit([self._currentTaskDisplay, *self._waitingTaskDisplayQueue])
             return self._current_task
