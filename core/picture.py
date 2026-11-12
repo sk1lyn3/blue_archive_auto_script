@@ -63,7 +63,7 @@ def co_detect(
     self.last_click_time = 0
     self.last_click_position = (0, 0)
     self.last_click_name = ""
-    start_time = time.time()
+    start_time = self.recognition_time()
     feature_last_appear_time = start_time
     last_check_pkg_time = start_time
     check_global_news = self.server == "Global" and any(
@@ -77,7 +77,7 @@ def co_detect(
         img_ends = [img_ends]
 
     while self.flag_run:
-        current_time = time.time()
+        current_time = self.recognition_time()
         if skip_first_screenshot and self.latest_img_array is not None:
             skip_first_screenshot = False
         else:
@@ -108,7 +108,7 @@ def co_detect(
                 if current_time - self.last_click_time > 2 or self.last_click_name != "main_page_news":
                     self.logger.info(f"Global news popup -> Click @ ({position[0]},{position[1]})")
                     self.click(*position)
-                    self.last_click_time = time.time()
+                    self.last_click_time = self.recognition_time()
                     self.last_click_name = "main_page_news"
                     self.last_click_position = position
                 continue
@@ -154,7 +154,7 @@ def co_detect(
                 if match_img_feature(self, img_feature, threshold, rgb_diff):
                     matched = True
                     feature_last_appear_time = current_time
-                    if (time.time() - self.last_click_time <= 2
+                    if (self.recognition_time() - self.last_click_time <= 2
                         and self.last_click_position[0] == click[0] and self.last_click_position[1] == click[1]
                         and self.last_click_name == img_feature):
                         break
@@ -209,7 +209,7 @@ def deal_with_pop_ups(self, pop_ups_rgb_reactions: dict = None, pop_ups_img_reac
                 self.set_screenshot_interval(1)
             if click[0] >= 0 and click[1] >= 0:
                 self.click(click[0], click[1])
-                self.last_click_time = time.time()
+                self.last_click_time = self.recognition_time()
                 self.last_click_position = (click[0], click[1])
                 self.last_click_name = rgb_feature
                 return True, rgb_feature
@@ -243,7 +243,7 @@ def deal_with_pop_ups(self, pop_ups_rgb_reactions: dict = None, pop_ups_img_reac
                 choose_buff(self)
             if click[0] >= 0 and click[1] >= 0:
                 self.click(click[0], click[1])
-                self.last_click_time = time.time()
+                self.last_click_time = self.recognition_time()
                 self.last_click_position = (click[0], click[1])
                 self.last_click_name = rgb_feature
                 return True, rgb_feature

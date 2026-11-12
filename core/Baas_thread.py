@@ -128,6 +128,10 @@ class Baas_thread:
     def get_config(self):
         return self.config_set
 
+    def recognition_time(self):
+        """Clock for recognition waits; device integrations may exclude manual pauses."""
+        return time.time()
+
     def click(self, x, y, count=1, rate=0, duration=0, wait_over=False):
         if not self.flag_run:
             raise RequestHumanTakeOver

@@ -11,11 +11,11 @@ if TYPE_CHECKING:
 
 
 def wait_loading(self: Baas_thread) -> None:
-    startTime = time.time()
+    startTime = self.recognition_time()
     while (self.flag_run and
            match_rgb_feature(self, "loadingNotWhite") and match_rgb_feature(self, "loadingWhite")):
         self.update_screenshot_array()
-        loadingTime = round(time.time() - startTime, 3)
+        loadingTime = round(self.recognition_time() - startTime, 3)
         self.logger.info("Detected loading, loading time: " + str(loadingTime))
         time.sleep(self.screenshot_interval)
     return
