@@ -3562,7 +3562,7 @@ STATIC_DEFAULT_CONFIG = '''
         ]
     },
     "current_game_activity": {
-        "CN": "ShesideOutside",
+        "CN": "ForWhomTheArtIsForTheFateofDecorativePaintingandAesthetics",
         "Global": "ChairMakotosLuxSummerGetaway",
         "JP": "ArtOfManipulationTheIvoryTowerAndTheUninvitedGuest"
     },
