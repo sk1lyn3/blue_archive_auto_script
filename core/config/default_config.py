@@ -3563,7 +3563,7 @@ STATIC_DEFAULT_CONFIG = '''
     },
     "current_game_activity": {
         "CN": "ForWhomTheArtIsForTheFateofDecorativePaintingandAesthetics",
-        "Global": "ChairMakotosLuxSummerGetaway",
+        "Global": "PandemicHazardAMiraclePancake",
         "JP": "ArtOfManipulationTheIvoryTowerAndTheUninvitedGuest"
     },
     "dailyGameActivity": {
