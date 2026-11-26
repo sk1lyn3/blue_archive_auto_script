@@ -506,6 +506,7 @@ def explore_activity_challenge(self):
             self.click(1235, 41)
         to_activity(self, "mission", True)
         to_activity(self, "challenge", True)
+    return True
 
 
 def start_mission(self, attribute_str: str):
