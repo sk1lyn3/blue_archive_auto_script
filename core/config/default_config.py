@@ -3564,7 +3564,7 @@ STATIC_DEFAULT_CONFIG = '''
     "current_game_activity": {
         "CN": "ShesideOutside",
         "Global": "ChairMakotosLuxSummerGetaway",
-        "JP": "ForWhomTheArtIsForTheFateofDecorativePaintingandAesthetics"
+        "JP": "ArtOfManipulationTheIvoryTowerAndTheUninvitedGuest"
     },
     "dailyGameActivity": {
         "CN": null,
